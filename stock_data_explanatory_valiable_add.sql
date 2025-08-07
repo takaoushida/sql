@@ -14,8 +14,8 @@ base as(
 max_add as(
     select
         *,
-        max(high) over(partition by stock_code order by row_number rows between current row and +90 following) as max_high,
-        min(low) over(partition by stock_code order by row_number rows between current row and +90 following) as min_low,
+        max(high) over(partition by stock_code order by row_number rows between +1 following and +90 following) as max_high,
+        min(low) over(partition by stock_code order by row_number rows between +1 following and +90 following) as min_low,
     from
         base 
 ),
