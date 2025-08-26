@@ -72,9 +72,9 @@ trend_add as(--移動平均のクロスを判別するフラグや各指標の�
         case when short_avg >= long_avg then 'upper' else 'lower' end as trend,--7日間平均が28日平均を上回っていればupper
         case when close > before_close then close - before_close else 0 end as gain,
         case when close < before_close then before_close - close else 0 end as loss,
-        min(close) over(partition by stock_code order by created_at rows between 750 preceding and current row) as min_3year_close,--直近3年間の最安値
-        max(close) over(partition by stock_code order by created_at rows between 750 preceding and current row) as max_3year_close,--直近3年間の最安値
-        min(created_at) over(partition by stock_code order by created_at rows between 750 preceding and current row) min_3year_day,--直近3年間の最初の日
+        min(close) over(partition by stock_code order by created_at rows between 60 preceding and current row) as min_60day_close,--直近N日の最安値
+        max(close) over(partition by stock_code order by created_at rows between 60 preceding and current row) as max_60day_close,--直近N日の最安値
+        min(created_at) over(partition by stock_code) min_dt,
         (close - range_min) / nullif((range_max - range_min),0) as k_value,
         ((close - ifnull(before_day7_close,0)) / nullif(before_day7_close,0)) * 100 as roc,
         case when close > before_close then 1 else 0 end as day2_cnt,
@@ -146,12 +146,12 @@ sign_add3 as(
     cast((1 - ((rci_d_value * 6) / (7*48))) * 100 as int64) as rci,  --分母はn(nの2乗-1),7日なので7*48
     close / nullif(long_avg,0) as envelope,
     case
-        when date_add(created_at,interval - 100 day) <= min_3year_day then null   --当日から100日引いた日付　より　直近3年間の営業日の最小日が大きいならnull
-        else close / min_3year_close 
+        when date_diff(created_at,min_dt,day) < 60 then null   --N日経過していないならnull
+        else close / min_60day_close 
     end as bottom_relative_rate,
     case
-        when date_add(created_at,interval - 100 day) <= min_3year_day then null   --当日から100日引いた日付　より　直近3年間の営業日の最小日が大きいならnull
-        else close / max_3year_close 
+        when date_diff(created_at,min_dt,day) < 60 then null   --N日経過していないならnull
+        else close / max_60day_close 
     end as top_relative_rate,
     t2.type1
     from 
