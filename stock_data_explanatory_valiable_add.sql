@@ -2,6 +2,45 @@ drop table looker_datamart.stock_data_explanatory_valiable_add ;
 create table looker_datamart.stock_data_explanatory_valiable_add 
 partition by created_at as(
 with
+delisting_tb as(
+    select
+        *
+    from
+        `stock_data_delisting.*`
+),
+delisting_stock_code as(
+    select
+        distinct
+        stock_code
+    from
+        delisting_tb
+),
+delisting_mst as(
+    select
+        stock_code
+    from
+        `stock_data_mst.delisting_20*`
+    where
+        end_date <= current_date('Asia/Tokyo')
+),
+tokyo_01 as(
+    select
+        t1.*
+    from
+        stock_data.tokyo_01 as t1
+    left join
+        delisting_mst as t2
+        on t1.stock_code = t2.stock_code
+    left join
+        delisting_stock_code as t3
+        on t1.stock_code = t3.stock_code
+    where
+        t2.stock_code is null and t3.stock_code is null
+),
+all_stock_data as(
+    select * from tokyo_01 union all
+    select * from delisting_tb
+),
 base as(
     select
         cast(date as date) as created_at,
@@ -9,7 +48,7 @@ base as(
         lead(open,1) over(partition by stock_code order by cast(date as date)) as contract_price,--翌日の始値が約定価格
         row_number() over(partition by stock_code order by cast(date as date)) as row_number
     from
-        stock_data.tokyo_01
+        all_stock_data 
 ),
 max_add as(
     select
@@ -23,23 +62,71 @@ flg_add as(
     select
         *,
         case when max_high / contract_price >= 1.1 then 1 end as win_flg,
-        case when min_low / contract_price <= 0.94 then 1 end as lose_flg,
+        case when min_low / contract_price <= 0.94 then 1 end as pre_lose_flg,
     from
         max_add
+),
+pre_supervision as(--管理銘柄のテーブル
+    select
+        * except(url,excluded,name),
+        ifnull(date_add(lead(release_date,1) over(partition by stock_code order by release_date),interval -1 day),current_date('Asia/Tokyo')) as end_date
+    from    
+        `stock_data.supervision_*`
+),
+supervision as(
+    select
+        * ,
+        case
+            when status = '指定' then reason
+        end as supervision_reason
+    from
+        pre_supervision
+),
+buyback_join as(--期間がかぶることがある
+    select
+        t1.*,        
+        case 
+            when date_diff(t1.created_at,t2.start_date,day) between -20 and 0 then 1
+        end as buyback_flg
+    from
+        flg_add as t1
+    left join
+        `stock_data.buyback_*` as t2
+        on t1.stock_code = t2.stock_code and t1.created_at between t2.release_date and t2.end_date
+),
+buyback_unique as(
+    select
+        created_at,
+        stock_code,
+        case when sum(buyback_flg) > 0 then 1 end as buyback_flg
+    from
+        buyback_join
+    group by 1,2
 ),
 quartely_report_add as(
     select
         t1.*,
+        case when t1.win_flg is null and t1.pre_lose_flg = 1 then 1 end as lose_flg,
         t2.* except(stock_code,date,refine_flg,period,quarter,earnings,operating_income,ordinaly_profit,net_income,release_date,next_release_date),
-        case
-            when date_diff(t1.created_at,release_date,day) <= 120 then row_number() over(partition by t1.stock_code,release_date order by t1.created_at) 
-        end as past_day
+        (t3.split_stock_amount + t3.exist_stock_amount) / t3.exist_stock_amount as split_rate,
+        t3.release_date as split_release_date,
+        t4.buyback_flg,
+        t5.supervision_reason,
+        t5.release_date as supervision_release_date
     from
         flg_add as t1
     left join
         securities_report.quartely_report_for_learning as t2
         on t1.stock_code = t2.stock_code and t1.created_at between date_add(t2.release_date,interval +1 day) and t2.next_release_date 
-        and date_diff(t1.created_at,release_date,day) <= 120 --決算短信の掲載漏れがある・・・！？　四半期ごとに出ているはずなので漏れがあったら結合しない
+        and date_diff(t1.created_at,t2.release_date,day) <= 120 --決算短信の掲載漏れがある・・・！？　四半期ごとに出ているはずなので漏れがあったら結合しない
+    left join
+        `stock_data.cleanging_stock_split` as t3
+        on t1.stock_code = t3.stock_code and t1.created_at = t3.release_date
+    left join
+        buyback_unique as t4
+        on t1.stock_code = t4.stock_code and t1.created_at = t4.created_at
+    left join supervision as t5
+        on t1.stock_code = t5.stock_code and t1.created_at between t5.release_date and t5.end_date
 ),
 data_tb as(
     select
@@ -48,32 +135,46 @@ data_tb as(
         close / nullif(((net_assets*1000000)/nullif(stock_amount,0)),0) as pbr,--株価純資産倍率　※2024年版ではnet_assets*1000000*4になっていた,net_assetsは純資産だから四半期ごとの値じゃないので4倍してはいけない
         (quarter_net_income*1000000 * 4) / ((total_assets*1000000) * nullif((equity_ratio/100),0))  as roe,--自己資本利益率
         (quarter_net_income*1000000 * 4) / nullif((total_assets*1000000),0) as roa,--総資産利益率    
-        close * stock_amount as market_cap--時価総額    
+        close * stock_amount as market_cap,--時価総額 
+        max(split_release_date) over(partition by stock_code order by created_at) as running_release_date,   
+        date_diff(created_at,supervision_release_date,day) as supervision_past_day,
+        EXP(SUM(LOG(IFNULL(split_rate,1))) OVER (
+            PARTITION BY stock_code
+            ORDER BY created_at desc
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        )) AS cum_split_rate --利回りを調整後利回りにするための累積値
     from
         quartely_report_add
 ),
 base_aggre as(--各テクニカル指標の元となる値を集計
-    select *,
-        avg(close) over(partition by stock_code order by created_at rows between 6 preceding and current row) as short_avg, --7日間平均 
-        avg(close) over(partition by stock_code order by created_at rows between 27 preceding and current row) as long_avg, --28日間平均
-        lag(close,1) over(partition by stock_code order by created_at) as before_close, --前日の値
-        lag(close,2) over(partition by stock_code order by created_at) as before_day3_close, 
-        lag(close,3) over(partition by stock_code order by created_at) as before_day4_close, 
-        lag(close,4) over(partition by stock_code order by created_at) as before_day5_close, 
-        lag(close,5) over(partition by stock_code order by created_at) as before_day6_close, 
-        lag(close,6) over(partition by stock_code order by created_at) as before_day7_close, --7日前の値
-        min(close) over(partition by stock_code order by created_at rows between 6 preceding and current row) as range_min,--直近7日間の最安値,
-        max(close) over(partition by stock_code order by created_at rows between 6 preceding and current row) as range_max,--直近7日間の最高値,
+    select t1.* except(split_rate,stock_reward,cum_split_rate),
+        avg(t1.close) over(partition by t1.stock_code order by t1.created_at rows between 6 preceding and current row) as short_avg, --7日間平均 
+        avg(t1.close) over(partition by t1.stock_code order by t1.created_at rows between 27 preceding and current row) as long_avg, --28日間平均
+        lag(t1.close,1) over(partition by t1.stock_code order by t1.created_at) as before_close, --前日の値
+        lag(t1.close,2) over(partition by t1.stock_code order by t1.created_at) as before_day3_close, 
+        lag(t1.close,3) over(partition by t1.stock_code order by t1.created_at) as before_day4_close, 
+        lag(t1.close,4) over(partition by t1.stock_code order by t1.created_at) as before_day5_close, 
+        lag(t1.close,5) over(partition by t1.stock_code order by t1.created_at) as before_day6_close, 
+        lag(t1.close,6) over(partition by t1.stock_code order by t1.created_at) as before_day7_close, --7日前の値
+        min(t1.close) over(partition by t1.stock_code order by t1.created_at rows between 6 preceding and current row) as range_min,--直近7日間の最安値,
+        max(t1.close) over(partition by t1.stock_code order by t1.created_at rows between 6 preceding and current row) as range_max,--直近7日間の最高値,
+        t2.split_rate,
+        t1.stock_reward / t1.cum_split_rate as stock_reward, --調整後配当
     from 
-        data_tb    
+        data_tb as t1
+    left join
+        data_tb as t2
+        on t1.stock_code = t2.stock_code and t1.running_release_date = t2.split_release_date
 ),
 trend_add as(--移動平均のクロスを判別するフラグや各指標の元となる値を引き続き集計
-    select *,
+    select * except(split_release_date,running_release_date),
         case when short_avg >= long_avg then 'upper' else 'lower' end as trend,--7日間平均が28日平均を上回っていればupper
         case when close > before_close then close - before_close else 0 end as gain,
         case when close < before_close then before_close - close else 0 end as loss,
         min(close) over(partition by stock_code order by created_at rows between 60 preceding and current row) as min_60day_close,--直近N日の最安値
         max(close) over(partition by stock_code order by created_at rows between 60 preceding and current row) as max_60day_close,--直近N日の最安値
+        min(close) over(partition by stock_code order by created_at rows between 750 preceding and current row) as min_3year_close,--直近N日の最安値
+        max(close) over(partition by stock_code order by created_at rows between 750 preceding and current row) as max_3year_close,--直近N日の最安値
         min(created_at) over(partition by stock_code) min_dt,
         (close - range_min) / nullif((range_max - range_min),0) as k_value,
         ((close - ifnull(before_day7_close,0)) / nullif(before_day7_close,0)) * 100 as roc,
@@ -88,6 +189,8 @@ trend_add as(--移動平均のクロスを判別するフラグや各指標の�
             when close < before_close then 'down'
             else 'stay'
         end as price_movement,
+        date_diff(created_at,running_release_date,day) as release_past_day,
+        (close - before_close) / close as daily_volatility,
     from 
         base_aggre
 ),
@@ -102,9 +205,16 @@ trend_lag_add as(--クロス発生か否かを判別するため、前日のフ�
         day2_cnt + day3_cnt + day4_cnt + day5_cnt + day6_cnt + day7_cnt +1 as close_rank,
         ifnull(sum(case when price_movement = 'up' then volume else 0 end) over(partition by stock_code order by created_at rows between 19 preceding and current row),0) as up_volume,
         ifnull(sum(case when price_movement = 'down' then volume else 0 end) over(partition by stock_code order by created_at rows between 19 preceding and current row),0) as down_volume,
-        ifnull(sum(case when price_movement = 'stay' then volume else 0 end) over(partition by stock_code order by created_at rows between 19 preceding and current row),0) as stay_volume
-
-    from 
+        ifnull(sum(case when price_movement = 'stay' then volume else 0 end) over(partition by stock_code order by created_at rows between 19 preceding and current row),0) as stay_volume,
+        case 
+            when release_past_day <= 30 then
+                case
+                    when split_rate < 2 then 1
+                    when split_rate < 5 then 2
+                    when split_rate >= 5 then 3
+            end 
+        end as stock_split,
+    from
         trend_add
 ),
 sign_add as(--前日のフラグと異なるなら売買サイン,stcasticksも移動平均と同様クロス判別が必要なのでここでフラグ建て
@@ -148,10 +258,18 @@ sign_add3 as(
     case
         when date_diff(created_at,min_dt,day) < 60 then null   --N日経過していないならnull
         else close / min_60day_close 
-    end as bottom_relative_rate,
+    end as day60_bottom_relative_rate,
     case
         when date_diff(created_at,min_dt,day) < 60 then null   --N日経過していないならnull
         else close / max_60day_close 
+    end as day60_top_relative_rate,
+    case
+        when date_diff(created_at,min_dt,day) < 100 then null   --N日経過していないならnull
+        else close / min_3year_close 
+    end as bottom_relative_rate,
+    case
+        when date_diff(created_at,min_dt,day) < 100 then null   --N日経過していないならnull
+        else close / max_3year_close 
     end as top_relative_rate,
     t2.type1
     from 
@@ -159,15 +277,6 @@ sign_add3 as(
     left join
         stock_data_mst.stock_data_mst_tokyo_01 as t2
         on t1.stock_code = t2.code        
-),
-avg_aggre as(
-    select
-        type1,
-        avg(per) as avg_per,
-        stddev(per) as std_per
-    from
-        sign_add3
-    group by 1
 ),
 minkabu_tb as(
     select 
@@ -191,19 +300,20 @@ select
     t1.stock_code,
     t1.close,
     t1.volume,
-    t1.past_day,
     contract_price,--約定値段
     win_flg,
     lose_flg,
+    (max_high - close) / close as max_high_rate,
+    (min_low - close) / close as min_low_rate,
     extract(month from created_at) as month,
-    stock_reward / nullif(close,0) as reward_rate,
-    stock_reward,--配当
+    stock_reward / nullif(close,0) as reward_rate, --調整後利回り
+    stock_reward,--調整後配当
     quarter_earnings_rate,--売上高(前年同期比)
     quarter_operating_income_rate,--営業利益(前年同期比)
     quarter_operating_income_gain_rate,--営業利益率(前年同期比)
     quarter_ordinaly_profit_rate,--経常利益(前年同期比)
     quarter_net_income_rate,--純利益(前年同期比)
-    50 + 10 * (t1.per - t2.avg_per) / std_per as deviation_per, --業種別PER偏差
+    per, --per
     pbr,--株価純資産倍率
     roe,--自己資本利益率
     roa,--総資産利益率
@@ -217,22 +327,40 @@ select
     envelope,
     bottom_relative_rate,--直近3年の最安値に対する元終値の割合
     top_relative_rate,--同上の最高値
+    day60_bottom_relative_rate,
+    day60_top_relative_rate,
     row_number() over(partition by t1.stock_code order by created_at) as day_number,
-    case when date_diff(t1.created_at,t3.ipo_date,day) <= 365 then 1 else 0 end as ipo_flg, --上場日から直近1年間にフラグ
-    case when volume_ratio is null then 1 else 0 end as vr_null_flg,
+    case when date_diff(t1.created_at,t2.ipo_date,day) <= 365 then 1 else 0 end as ipo_flg, --上場日から直近1年間にフラグ
     case 
         when market_cap >= 500000000000 then 'large'
         when market_cap >= 200000000000 then 'mid'
         else 'small'
-    end as market_cap_section
+    end as market_cap_section,--時価総額
+    stock_split,--株式分割(カテゴリ),1:1-1未満,2:1-5未満,3:1-5以上
+    buyback_flg,--自社株買い(カテゴリ),買いが開始される20日前～当日にフラグが立つ ※多くの場合は前営業日に発表ではある
+    supervision_reason,--管理銘柄になっている理由
+    supervision_past_day,
+    case
+        when long_avg < 50 then 1
+        when long_avg < 300 then 2
+        when long_avg < 1000 then 3
+        when long_avg < 5000 then 4
+        else 5
+    end as price_range,--価格帯
+    case 
+        when daily_volatility < -0.15 then 1
+        when daily_volatility < -0.1 then 2
+        when daily_volatility < -0.02 then 3
+        when daily_volatility < 0.02 then 4
+        when daily_volatility < 0.1 then 5
+        when daily_volatility < 0.15 then 6
+        when daily_volatility >= 0.15 then 7
+    end as volatility
 from 
     sign_add3 as t1
 left join
-    avg_aggre as t2
-    on t1.type1 = t2.type1
-left join
-    minkabu as t3
-    on t1.stock_code = t3.stock_code
+    minkabu as t2
+    on t1.stock_code = t2.stock_code
 );
 
 
