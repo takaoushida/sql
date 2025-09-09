@@ -1,5 +1,4 @@
-drop table looker_datamart.stock_data_explanatory_valiable_add ;
-create table looker_datamart.stock_data_explanatory_valiable_add 
+create or replace table looker_datamart.stock_data_explanatory_valiable_add 
 partition by created_at as(
 with
 delisting_tb as(
@@ -103,9 +102,70 @@ buyback_unique as(
         buyback_join
     group by 1,2
 ),
+quartely_report as(
+    select
+        *,
+        (net_income - lag(net_income,1) over(partition by stock_code,quarter order by period) )/ nullif(abs(lag(net_income,1) over(partition by stock_code,quarter order by period)),0) as net_income_gain_rate, --前年同期比の純利益増減率
+    from
+        securities_report.quartely_report_for_learning
+),
+quarter4 as(--4期のみにする
+    select
+        *
+    from
+        quartely_report
+    where
+        quarter = 4
+),
+decrease_add as(--減益となった場合フラグを立てる
+    select
+        *,
+        case
+            when net_income - lag(net_income,1) over(partition by stock_code order by date) < 0 then 1
+        end as decrease_flg
+     from
+        quarter4
+),
+decrease_running as(--減益となった累計回数を付与
+    select
+        *,
+        sum(decrease_flg) over(partition by stock_code order by date) as running_decrease
+    from
+        decrease_add
+),
+increase_num_add as(--累計減益回数毎の累計行数=連続増益回数を集計
+    select
+        *,
+        count(stock_code) over(partition by stock_code,running_decrease order by date) as increase_num,
+        max(period) over(partition by stock_code) as max_period
+    from
+        decrease_running
+),
+max_period_only as(--最新の4期のみにする
+    select
+        *
+    from
+        increase_num_add
+    where
+        period = max_period
+),
+quartely_report_with_increase_num as(--最新の期が4期でない場合nullとなってしまうのでその場合最新の4期の連続増益回数を付与
+    select
+        t1.*,
+        coalesce(t2.increase_num,t3.increase_num) as increase_num
+    from
+        quartely_report as t1
+    left join
+        increase_num_add as t2
+        on t1.stock_code = t2.stock_code and t1.period = t2.period
+    left join
+        max_period_only as t3
+        on t1.stock_code = t3.stock_code
+),
 quartely_report_add as(
     select
         t1.*,
+        date_diff(t1.created_at,t2.release_date,day) as report_release_past_day,
         case when t1.win_flg is null and t1.pre_lose_flg = 1 then 1 end as lose_flg,
         t2.* except(stock_code,date,refine_flg,period,quarter,earnings,operating_income,ordinaly_profit,net_income,release_date,next_release_date),
         (t3.split_stock_amount + t3.exist_stock_amount) / t3.exist_stock_amount as split_rate,
@@ -116,8 +176,8 @@ quartely_report_add as(
     from
         flg_add as t1
     left join
-        securities_report.quartely_report_for_learning as t2
-        on t1.stock_code = t2.stock_code and t1.created_at between date_add(t2.release_date,interval +1 day) and t2.next_release_date 
+        quartely_report_with_increase_num as t2
+        on t1.stock_code = t2.stock_code and t1.created_at between t2.release_date and date_add(t2.next_release_date,interval -1 day) --1日遅延させていたのを解消
         and date_diff(t1.created_at,t2.release_date,day) <= 120 --決算短信の掲載漏れがある・・・！？　四半期ごとに出ているはずなので漏れがあったら結合しない
     left join
         `stock_data.cleanging_stock_split` as t3
@@ -355,7 +415,23 @@ select
         when daily_volatility < 0.1 then 5
         when daily_volatility < 0.15 then 6
         when daily_volatility >= 0.15 then 7
-    end as volatility
+    end as volatility,
+    case
+        when report_release_past_day <= 90 then --4半期に一度なので90日以内で限定
+            case
+                when net_income_gain_rate is null then 2
+                when net_income_gain_rate < -5 then 3 -- -500%未満
+                when net_income_gain_rate < -1 then 4 -- -100%未満
+                when net_income_gain_rate < -0.2 then 5 -- -20%未満
+                when net_income_gain_rate < 2 then 6 -- 200%未満
+                when net_income_gain_rate >= 2 then 7 --200%未満
+            end
+        else 1
+    end as net_income_gain_flg,
+    case 
+        when increase_num <= 2 then increase_num
+        when increase_num is not null then 3
+    end as increase_num,
 from 
     sign_add3 as t1
 left join

@@ -87,7 +87,7 @@ remax_row_number_add as(--複数結合したうち、最新日付のものだけ
 select 
     * except(quarter_row_number,row_number,row_number2,max_row_number2,before_period_earnings,before_period_operating_income,before_period_ordinaly_profit,before_period_net_income),
     cast(date as date) as release_date,
-    ifnull(lead(cast(date as date),1) over(partition by stock_code order by date),current_date('Asia/Tokyo')) as next_release_date
+    ifnull(lead(cast(date as date),1) over(partition by stock_code order by date),date_add(current_date('Asia/Tokyo'),interval +1 day)) as next_release_date --次回の短信がないなら明日の日付※株価との結合時-1dayで結合するので1日多くしておく
 from 
     remax_row_number_add
 where
