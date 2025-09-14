@@ -1,4 +1,4 @@
-create or replace table looker_datamart.stock_data_explanatory_valiable_add 
+create or replace table looker_datamart.stock_data_explanatory_valiable_add
 partition by created_at as(
 with
 delisting_tb as(
@@ -122,13 +122,17 @@ decrease_add as(--減益となった場合フラグを立てる
         *,
         case
             when net_income - lag(net_income,1) over(partition by stock_code order by date) < 0 then 1
-        end as decrease_flg
+        end as decrease_flg,
+        case
+            when net_income - lag(net_income,1) over(partition by stock_code order by date) > 0 then 1
+        end as increase_flg,        
      from
         quarter4
 ),
 decrease_running as(--減益となった累計回数を付与
     select
         *,
+        sum(increase_flg) over(partition by stock_code order by date) as running_increase,
         sum(decrease_flg) over(partition by stock_code order by date) as running_decrease
     from
         decrease_add
@@ -136,23 +140,31 @@ decrease_running as(--減益となった累計回数を付与
 increase_num_add as(--累計減益回数毎の累計行数=連続増益回数を集計
     select
         *,
-        count(stock_code) over(partition by stock_code,running_decrease order by date) as increase_num,
+        sum(increase_flg) over(partition by stock_code,running_decrease order by date) as increase_num,--partition by が逆にしてある点に注意
+        sum(decrease_flg) over(partition by stock_code,running_increase order by date) * -1 as decrease_num,--逆にすることで累計が成立する
         max(period) over(partition by stock_code) as max_period
     from
         decrease_running
+),
+increase_num_fin as(
+    select
+        * except(increase_num,decrease_num),
+        coalesce(increase_num,decrease_num) as increase_num
+    from
+        increase_num_add
 ),
 max_period_only as(--最新の4期のみにする
     select
         *
     from
-        increase_num_add
+        increase_num_fin
     where
         period = max_period
 ),
 quartely_report_with_increase_num as(--最新の期が4期でない場合nullとなってしまうのでその場合最新の4期の連続増益回数を付与
     select
         t1.*,
-        coalesce(t2.increase_num,t3.increase_num) as increase_num
+        coalesce(t2.increase_num,t3.increase_num) as increase_num,
     from
         quartely_report as t1
     left join
@@ -429,8 +441,9 @@ select
         else 1
     end as net_income_gain_flg,
     case 
-        when increase_num <= 2 then increase_num
-        when increase_num is not null then 3
+        when increase_num <= -3 then -3
+        when increase_num >= 3 then 3
+        else increase_num
     end as increase_num,
 from 
     sign_add3 as t1
