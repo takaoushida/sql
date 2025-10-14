@@ -1,5 +1,6 @@
 create or replace table looker_datamart.stock_data_explanatory_valiable_add
-partition by created_at as(
+partition by created_at 
+cluster by stock_code as(
 with
 delisting_tb as(
     select
@@ -104,82 +105,110 @@ buyback_unique as(
 ),
 quartely_report as(
     select
-        *,
-        (net_income - lag(net_income,1) over(partition by stock_code,quarter order by period) )/ nullif(abs(lag(net_income,1) over(partition by stock_code,quarter order by period)),0) as net_income_gain_rate, --前年同期比の純利益増減率
+        * except(earnings_title,operating_income_title,ordinaly_profit_title,net_income_title,earnings,operating_income,ordinaly_profit,before_earnings,before_operating_income,before_ordinaly_profit,title,inpage_title,xbrl,period_month,omit_flg,xbrl_less_known_flg),
+        min(period) over(partition by stock_code) as min_period,
+        (net_income - before_net_income)/ nullif(abs(before_net_income),0) as net_income_gain_rate, --前年同期比の純利益増減率
+        net_assets / nullif(total_assets,0) as equity_ratio
     from
-        securities_report.quartely_report_for_learning
+        `feature_learning_dev.quartely_report_for_learning`
 ),
-quarter4 as(--4期のみにする
+quartely_report_row_add as(--訂正を含めて最終行を割り出す,stock_code,period,quarter,release_date,refine_flgに対して一意
+    select
+        *,
+        row_number() over(partition by stock_code,period,quarter order by release_date desc,refine_flg desc) as row_number
+    from
+        quartely_report
+),
+quartely_report_max_only as(--最終行のみにする
+    select
+        * 
+    from
+        quartely_report_row_add
+    where
+        row_number = 1
+),
+quartely_report_lag_add as(--前年同期比のために前年同期を付与
+    select
+        *,
+        before_net_income as last_net_income--前年同期の純利益
+    from
+        quartely_report_max_only
+),
+quarter4 as(--4期のみにする,irbankをここに加えるつもりだったが証券コードは5年経過すると再利用されるようなので断念
     select
         *
     from
-        quartely_report
+        quartely_report_lag_add
     where
         quarter = 4
 ),
-decrease_add as(--減益となった場合フラグを立てる
+crease_add as(--減益となった場合フラグを立てる
     select
-        *,
+        *,        
         case
-            when net_income - lag(net_income,1) over(partition by stock_code order by date) < 0 then 1
+            when net_income - lag(net_income,1) over(partition by stock_code order by period) < 0 then 1
         end as decrease_flg,
         case
-            when net_income - lag(net_income,1) over(partition by stock_code order by date) > 0 then 1
+            when net_income - lag(net_income,1) over(partition by stock_code order by period) > 0 then 1
         end as increase_flg,        
      from
         quarter4
 ),
-decrease_running as(--減益となった累計回数を付与
+crease_running as(--減益となった累計回数を付与
     select
         *,
-        sum(increase_flg) over(partition by stock_code order by date) as running_increase,
-        sum(decrease_flg) over(partition by stock_code order by date) as running_decrease
+        sum(increase_flg) over(partition by stock_code order by period) as running_increase,
+        sum(decrease_flg) over(partition by stock_code order by period) as running_decrease
     from
-        decrease_add
+        crease_add
 ),
-increase_num_add as(--累計減益回数毎の累計行数=連続増益回数を集計
+crease_num_add as(--累計減益回数毎の累計行数=連続増益回数を集計
     select
         *,
-        sum(increase_flg) over(partition by stock_code,running_decrease order by date) as increase_num,--partition by が逆にしてある点に注意
-        sum(decrease_flg) over(partition by stock_code,running_increase order by date) * -1 as decrease_num,--逆にすることで累計が成立する
+        sum(increase_flg) over(partition by stock_code,running_decrease order by period) as increase_num,--partition by が逆にしてある点に注意
+        sum(decrease_flg) over(partition by stock_code,running_increase order by period) * -1 as decrease_num,--逆にすることで累計が成立する
         max(period) over(partition by stock_code) as max_period
     from
-        decrease_running
+        crease_running
 ),
-increase_num_fin as(
+crease_num_fin as(
     select
         * except(increase_num,decrease_num),
         coalesce(increase_num,decrease_num) as increase_num
     from
-        increase_num_add
+        crease_num_add
 ),
 max_period_only as(--最新の4期のみにする
     select
         *
     from
-        increase_num_fin
+        crease_num_fin
     where
         period = max_period
 ),
-quartely_report_with_increase_num as(--最新の期が4期でない場合nullとなってしまうのでその場合最新の4期の連続増益回数を付与
+quartely_report_with_increase_num as(--最新の期が4期でない場合nullとなってしまうのでその場合最新の4期の連続増益回数を付与,stock_code,period,quarterに対し一意
     select
-        t1.*,
-        coalesce(t2.increase_num,t3.increase_num) as increase_num,
+        t1.* except(min_period,refine_flg),
+        case
+            when t1.period = t1.min_period and t2.increase_num is null then null
+            else coalesce(t2.increase_num,t3.increase_num) 
+        end as increase_num,
+        t1.net_income - t1.last_net_income as quarter_net_income
     from
-        quartely_report as t1
+        quartely_report_lag_add as t1
     left join
-        increase_num_add as t2
+        crease_num_add as t2
         on t1.stock_code = t2.stock_code and t1.period = t2.period
     left join
         max_period_only as t3
         on t1.stock_code = t3.stock_code
 ),
-quartely_report_add as(
+quartely_report_add as(--created_at,stock_codeに対し一意
     select
         t1.*,
         date_diff(t1.created_at,t2.release_date,day) as report_release_past_day,
         case when t1.win_flg is null and t1.pre_lose_flg = 1 then 1 end as lose_flg,
-        t2.* except(stock_code,date,refine_flg,period,quarter,earnings,operating_income,ordinaly_profit,net_income,release_date,next_release_date),
+        t2.* except(stock_code,period,quarter),
         (t3.split_stock_amount + t3.exist_stock_amount) / t3.exist_stock_amount as split_rate,
         t3.release_date as split_release_date,
         t4.buyback_flg,
@@ -189,8 +218,7 @@ quartely_report_add as(
         flg_add as t1
     left join
         quartely_report_with_increase_num as t2
-        on t1.stock_code = t2.stock_code and t1.created_at between t2.release_date and date_add(t2.next_release_date,interval -1 day) --1日遅延させていたのを解消
-        and date_diff(t1.created_at,t2.release_date,day) <= 120 --決算短信の掲載漏れがある・・・！？　四半期ごとに出ているはずなので漏れがあったら結合しない
+        on t1.stock_code = t2.stock_code and t1.created_at between t2.join_start_date and t2.join_end_date 
     left join
         `stock_data.cleanging_stock_split` as t3
         on t1.stock_code = t3.stock_code and t1.created_at = t3.release_date
@@ -380,11 +408,7 @@ select
     extract(month from created_at) as month,
     stock_reward / nullif(close,0) as reward_rate, --調整後利回り
     stock_reward,--調整後配当
-    quarter_earnings_rate,--売上高(前年同期比)
-    quarter_operating_income_rate,--営業利益(前年同期比)
-    quarter_operating_income_gain_rate,--営業利益率(前年同期比)
-    quarter_ordinaly_profit_rate,--経常利益(前年同期比)
-    quarter_net_income_rate,--純利益(前年同期比)
+    net_income / nullif(last_net_income,0) as quarter_net_income_rate,--純利益(前年同期比)
     per, --per
     pbr,--株価純資産倍率
     roe,--自己資本利益率
@@ -445,6 +469,10 @@ select
         when increase_num >= 3 then 3
         else increase_num
     end as increase_num,
+    case 
+        when report_release_past_day >= 120 or net_income is null then 1 
+    end as irregular_flg,
+    change_flg
 from 
     sign_add3 as t1
 left join
