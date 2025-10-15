@@ -110,7 +110,7 @@ quartely_report as(
         (net_income - before_net_income)/ nullif(abs(before_net_income),0) as net_income_gain_rate, --前年同期比の純利益増減率
         net_assets / nullif(total_assets,0) as equity_ratio
     from
-        `feature_learning_dev.quartely_report_for_learning`
+        `securities_report.quartely_report_for_learning`
 ),
 quartely_report_row_add as(--訂正を含めて最終行を割り出す,stock_code,period,quarter,release_date,refine_flgに対して一意
     select
@@ -142,6 +142,45 @@ quarter4 as(--4期のみにする,irbankをここに加えるつもりだった�
     where
         quarter = 4
 ),
+irbank as(
+    select
+        *,
+        cast(format_date('%Y',year) as int64) as period
+    from
+        securities_report.irbank_past_data
+),
+quarter4_union as(
+    select
+        coalesce(t1.stock_code,t2.stock_code) as stock_code,
+        coalesce(t1.period,t2.period) as period,
+        coalesce(t1.net_income,t2.net_income /1000000) as net_income
+    from
+        quarter4 as t1
+    full outer join
+        irbank as t2
+        on t1.stock_code = t2.stock_code and t1.period = t2.period
+),
+quarter4_union_lead_add as(
+    select
+        *,
+        lead(period,1) over(partition by stock_code order by period) as next_period
+    from
+        quarter4_union
+),
+quarter_union_flg_add as(--年度が飛んでいる行にフラグ立て
+    select
+        *,
+        case when next_period != period +1 then 1 end as skip_flg
+    from
+        quarter4_union_lead_add
+),
+quarter4_union_runnings as(
+    select
+        *,
+        sum(skip_flg) over(partition by stock_code order by period desc) as other_code_flg --年が飛んでいる=別銘柄
+    from
+        quarter_union_flg_add
+),
 crease_add as(--減益となった場合フラグを立てる
     select
         *,        
@@ -152,7 +191,7 @@ crease_add as(--減益となった場合フラグを立てる
             when net_income - lag(net_income,1) over(partition by stock_code order by period) > 0 then 1
         end as increase_flg,        
      from
-        quarter4
+        quarter4_union_runnings
 ),
 crease_running as(--減益となった累計回数を付与
     select
@@ -197,7 +236,7 @@ quartely_report_with_increase_num as(--最新の期が4期でない場合nullと
     from
         quartely_report_lag_add as t1
     left join
-        crease_num_add as t2
+        crease_num_fin as t2
         on t1.stock_code = t2.stock_code and t1.period = t2.period
     left join
         max_period_only as t3
