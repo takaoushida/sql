@@ -491,17 +491,13 @@ select
         when daily_volatility < 0.15 then 6
         when daily_volatility >= 0.15 then 7
     end as volatility,
-    case
-        when report_release_past_day <= 90 then --4半期に一度なので90日以内で限定
-            case
-                when net_income_gain_rate is null then 2
-                when net_income_gain_rate < -5 then 3 -- -500%未満
-                when net_income_gain_rate < -1 then 4 -- -100%未満
-                when net_income_gain_rate < -0.2 then 5 -- -20%未満
-                when net_income_gain_rate < 2 then 6 -- 200%未満
-                when net_income_gain_rate >= 2 then 7 --200%未満
-            end
-        else 1
+    case--元々report_release_past_day<=90で　elseを1としていたがirregular_flgつけたので削除した
+        when net_income_gain_rate is null then 2
+        when net_income_gain_rate < -5 then 3 -- -500%未満
+        when net_income_gain_rate < -1 then 4 -- -100%未満
+        when net_income_gain_rate < -0.2 then 5 -- -20%未満
+        when net_income_gain_rate < 2 then 6 -- 200%未満
+        when net_income_gain_rate >= 2 then 7 --200%未満
     end as net_income_gain_flg,
     case 
         when increase_num <= -3 then -3
