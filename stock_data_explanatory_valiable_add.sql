@@ -105,12 +105,16 @@ buyback_unique as(
 ),
 quartely_report as(
     select
-        * except(earnings_title,operating_income_title,ordinaly_profit_title,net_income_title,earnings,operating_income,ordinaly_profit,before_earnings,before_operating_income,before_ordinaly_profit,title,inpage_title,xbrl,period_month,omit_flg,xbrl_less_known_flg),
-        min(period) over(partition by stock_code) as min_period,
-        (net_income - before_net_income)/ nullif(abs(before_net_income),0) as net_income_gain_rate, --前年同期比の純利益増減率
-        net_assets / nullif(total_assets,0) as equity_ratio
+        t1.* except(earnings_title,operating_income_title,ordinaly_profit_title,net_income_title,earnings,operating_income,ordinaly_profit,before_earnings,before_operating_income,before_ordinaly_profit,title,inpage_title,xbrl,period_month,omit_flg,xbrl_less_known_flg),
+        min(t1.period) over(partition by t1.stock_code) as min_period,
+        (t1.net_income - t1.before_net_income)/ nullif(abs(t1.before_net_income),0) as net_income_gain_rate, --前年同期比の純利益増減率
+        t1.net_assets / nullif(t1.total_assets,0) as equity_ratio,
+        t2.year3_red_count
     from
-        `securities_report.quartely_report_for_learning`
+        `securities_report.quartely_report_for_learning` as t1
+    left join
+        `securities_report.quartely_report_for_bi` as t2
+        on t1.stock_code = t2.stock_code and t1.period = t2.period and t1.quarter = t2.quarter
 ),
 quartely_report_row_add as(--訂正を含めて最終行を割り出す,stock_code,period,quarter,release_date,refine_flgに対して一意
     select
@@ -248,8 +252,9 @@ quartely_report_add as(--created_at,stock_codeに対し一意
         date_diff(t1.created_at,t2.release_date,day) as report_release_past_day,
         case when t1.win_flg is null and t1.pre_lose_flg = 1 then 1 end as lose_flg,
         t2.* except(stock_code,period,quarter),
-        (t3.split_stock_amount + t3.exist_stock_amount) / t3.exist_stock_amount as split_rate,
-        t3.release_date as split_release_date,
+        (t3.split_stock_amount + t3.exist_stock_amount) / t3.exist_stock_amount as split_rate,--分割率,カテゴリとしては発表日ベース
+        t3.release_date as split_release_date,--株式分割発表日
+        t3.split_date,--実際に株式分割される日
         t4.buyback_flg,
         t5.supervision_reason,
         t5.release_date as supervision_release_date
@@ -259,7 +264,7 @@ quartely_report_add as(--created_at,stock_codeに対し一意
         quartely_report_with_increase_num as t2
         on t1.stock_code = t2.stock_code and t1.created_at between t2.join_start_date and t2.join_end_date 
     left join
-        `stock_data.cleanging_stock_split` as t3
+        `stock_data.stock_split_*` as t3
         on t1.stock_code = t3.stock_code and t1.created_at = t3.release_date
     left join
         buyback_unique as t4
@@ -272,8 +277,8 @@ data_tb as(
         *,
         close / nullif(((quarter_net_income*1000000 * 4)/nullif(stock_amount,0)),0) as per,--株価収益率
         close / nullif(((net_assets*1000000)/nullif(stock_amount,0)),0) as pbr,--株価純資産倍率　※2024年版ではnet_assets*1000000*4になっていた,net_assetsは純資産だから四半期ごとの値じゃないので4倍してはいけない
-        (quarter_net_income*1000000 * 4) / ((total_assets*1000000) * nullif((equity_ratio/100),0))  as roe,--自己資本利益率
-        (quarter_net_income*1000000 * 4) / nullif((total_assets*1000000),0) as roa,--総資産利益率    
+        quarter_net_income * 4 / nullif(total_assets,0) as roa,--ROA(総資産利益率)
+        quarter_net_income * 4 / nullif(net_assets,0) as roe, --ROE(自己資本利益率)
         close * stock_amount as market_cap,--時価総額 
         max(split_release_date) over(partition by stock_code order by created_at) as running_release_date,   
         date_diff(created_at,supervision_release_date,day) as supervision_past_day,
@@ -281,7 +286,7 @@ data_tb as(
             PARTITION BY stock_code
             ORDER BY created_at desc
             ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-        )) AS cum_split_rate --利回りを調整後利回りにするための累積値
+        )) AS cum_split_rate, --利回りを調整後利回りにするための累積値
     from
         quartely_report_add
 ),
@@ -298,12 +303,16 @@ base_aggre as(--各テクニカル指標の元となる値を集計
         min(t1.close) over(partition by t1.stock_code order by t1.created_at rows between 6 preceding and current row) as range_min,--直近7日間の最安値,
         max(t1.close) over(partition by t1.stock_code order by t1.created_at rows between 6 preceding and current row) as range_max,--直近7日間の最高値,
         t2.split_rate,
-        t1.stock_reward / t1.cum_split_rate as stock_reward, --調整後配当
+        t3.cum_split_rate,--累積株式分割,分割された日以前に適用される
+        t1.stock_reward / ifnull(t3.cum_split_rate,1) as stock_reward, --調整後配当
     from 
         data_tb as t1
     left join
         data_tb as t2
         on t1.stock_code = t2.stock_code and t1.running_release_date = t2.split_release_date
+    left join
+        data_tb as t3
+        on t1.stock_code = t2.stock_code and t1.created_at = t3.split_date --分割日が結合する日
 ),
 trend_add as(--移動平均のクロスを判別するフラグや各指標の元となる値を引き続き集計
     select * except(split_release_date,running_release_date),
@@ -447,7 +456,8 @@ select
     extract(month from created_at) as month,
     stock_reward / nullif(close,0) as reward_rate, --調整後利回り
     stock_reward,--調整後配当
-    net_income / nullif(last_net_income,0) as quarter_net_income_rate,--純利益(前年同期比)
+    --net_income / nullif(last_net_income,0) as quarter_net_income_rate,--純利益(前年同期比)
+   (net_income - last_net_income) / nullif(abs(last_net_income),0) as quarter_net_income_rate,--純利益(前年同期比)
     per, --per
     pbr,--株価純資産倍率
     roe,--自己資本利益率
@@ -507,7 +517,8 @@ select
     case 
         when report_release_past_day >= 120 or net_income is null then 1 
     end as irregular_flg,
-    change_flg
+    change_flg,
+    year3_red_count
 from 
     sign_add3 as t1
 left join
