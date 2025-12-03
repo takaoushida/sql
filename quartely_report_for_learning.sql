@@ -217,29 +217,57 @@ summary_tb as(
     left join
         before_tb as t3
         on t1.xbrl = t3.xbrl
+),
+base as(--beforeを掲載していない企業がある
+    select
+        t1.*,
+        t2.* except(xbrl,earnings,operating_income,ordinaly_profit,net_income,before_earnings,before_operating_income,before_ordinaly_profit,before_net_income),
+        cast(replace(replace(earnings,',',''),'(※)','') as float64) as earnings,
+        cast(replace(replace(operating_income,',',''),'(※)','') as float64) as operating_income,
+        cast(replace(replace(ordinaly_profit,',',''),'(※)','') as float64) as ordinaly_profit,
+        cast(replace(replace(net_income,',',''),'(※)','') as float64) as net_income,
+        cast(replace(replace(before_earnings,',',''),'(※)','') as float64) as before_earnings,
+        cast(replace(replace(before_operating_income,',',''),'(※)','') as float64) as before_operating_income,
+        cast(replace(replace(before_ordinaly_profit,',',''),'(※)','') as float64) as before_ordinaly_profit,
+        cast(replace(replace(before_net_income,',',''),'(※)','') as float64) as before_net_income,
+        total_assets,
+        net_assets,
+        stock_amount,
+        stock_reward,
+    from
+        jpx.refine_securities_report_master as t1
+    left join
+        summary_tb as t2
+        on t1.xbrl = t2.xbrl
+    left join
+        `jpx.others_*` as t3
+        on t1.xbrl = t3.xbrl
+),
+num_add as(--修正を含め四半期ごとの最終行を取得
+    select
+        *,
+        row_number() over(partition by stock_code,period,quarter order by release_date desc,refine_flg desc) as row_number
+    from
+        base
+),
+final_data as(--最終的なperiod,quarterの値のみにする
+    select
+        * 
+    from
+        num_add
+    where
+        row_number = 1
 )
-select
-    t1.*,
-    t2.* except(xbrl,earnings,operating_income,ordinaly_profit,net_income,before_earnings,before_operating_income,before_ordinaly_profit,before_net_income),
-    cast(replace(replace(earnings,',',''),'(※)','') as float64) as earnings,
-    cast(replace(replace(operating_income,',',''),'(※)','') as float64) as operating_income,
-    cast(replace(replace(ordinaly_profit,',',''),'(※)','') as float64) as ordinaly_profit,
-    cast(replace(replace(net_income,',',''),'(※)','') as float64) as net_income,
-    cast(replace(replace(before_earnings,',',''),'(※)','') as float64) as before_earnings,
-    cast(replace(replace(before_operating_income,',',''),'(※)','') as float64) as before_operating_income,
-    cast(replace(replace(before_ordinaly_profit,',',''),'(※)','') as float64) as before_ordinaly_profit,
-    cast(replace(replace(before_net_income,',',''),'(※)','') as float64) as before_net_income,
-    total_assets,
-    net_assets,
-    stock_amount,
-    stock_reward,
-from
-    jpx.refine_securities_report_master as t1
+--beforeがない場合前期の値をbeforeとして取得
+select 
+    t1.* except(xbrl,title,inpage_title,before_earnings,before_operating_income,before_ordinaly_profit,before_net_income),
+    coalesce(t1.before_earnings,t2.earnings) as before_earnings,
+    coalesce(t1.before_operating_income,t2.operating_income) as before_operating_income,
+    coalesce(t1.before_ordinaly_profit,t2.ordinaly_profit) as before_ordinaly_profit,
+    coalesce(t1.before_net_income,t2.net_income) as before_net_income
+from 
+    base as t1
 left join
-    summary_tb as t2
-    on t1.xbrl = t2.xbrl
-left join
-    `jpx.others_*` as t3
-    on t1.xbrl = t3.xbrl
-
+    final_data as t2
+    on t1.stock_code = t2.stock_code and t1.period -1 = t2.period and t1.quarter = t2.quarter
 )
