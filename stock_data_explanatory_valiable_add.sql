@@ -86,7 +86,7 @@ down_base as(
     from
         base_self_join
     where
-      future_low / contract_price <= 0.95 and date_diff(future_date,created_at,day) <= 120
+      future_low / contract_price <= 0.9 and date_diff(future_date,created_at,day) <= 120
 ),
 down_tb as(
     select
@@ -481,7 +481,7 @@ trend_add as(--移動平均のクロスを判別するフラグや各指標の�
             else 'stay'
         end as price_movement,
         date_diff(created_at,running_release_date,day) as release_past_day,
-        (close - before_close) / close as daily_volatility,
+        (close - before_close) / before_close as daily_volatility, --分母は以前はcloseだった
     from 
         base_aggre
 ),
@@ -721,9 +721,36 @@ point_sum as(
         p1 + p2 + p3 + p4 + p5 + p6 + p7 + p8 as weather_point --19点満点
     from
         point_add
+),
+market_base as(
+    select
+        *,
+        stddev_pop(daily_volatility) over(partition by stock_code order by created_at rows between 5 preceding and current row) as std_volatility
+    from
+        trend_add
+),
+market_daily as(
+    select
+        created_at,
+        count(stock_code) as ids,
+        count(case when close - before_close > 0 then stock_code end) as up_ids,
+        avg(close / nullif(before_close,0) -1) as daily_return,
+        avg(std_volatility) as market_volatility
+    from
+        market_base
+    group by 1
+),
+market as(
+    select
+        created_at,
+        sum(up_ids) over(order by created_at rows between 5 preceding and current row) / sum(ids) over(order by created_at rows between 5 preceding and current row) as market_breath,--上昇銘柄割合(5日平均)
+        avg(daily_return) over(order by created_at rows between 5 preceding and current row) as market_return,--前日比平均(5日平均)
+        market_volatility--標準偏差平均ボラティリティ(5日平均)
+    from
+        market_daily
 )
 select
-    * except(weather_point),
+    t1.* except(weather_point),
     case 
         when weather_point <= 1 then 'thunder'
         when weather_point <= 5 then 'rain'
@@ -743,7 +770,14 @@ select
     when theoretical_close >= 100 then 9
     else 0
     end theoretical_rate, --理論値株価乖離率
+    t2.market_breath,
+    t2.market_return,
+    t2.market_volatility
 from
-    point_sum
+    point_sum as t1
+left join
+    market as t2
+    on t1.created_at = t2.created_at
+
 );
 
