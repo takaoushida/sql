@@ -121,10 +121,10 @@ pre_flg as(
 flg_add as(
     select
         *,
-        case when win_date is not null then 1 end as win_flg,--モデル学習用のフラグ
-        case when lose_date is not null then 1 end as lose_flg,
-        case when win_date < ifnull(lose_date,current_date('Asia/Tokyo')) then 1 end as display_win_flg,--bi上のフラグ
-        case when lose_date < ifnull(win_date,current_date('Asia/Tokyo')) then 1 end as display_lose_flg
+        case when win_date is not null then 1 end as up_flg,--モデル学習用のフラグ
+        case when lose_date is not null then 1 end as down_flg,
+        case when win_date < ifnull(lose_date,current_date('Asia/Tokyo')) then 1 end as win_flg,--bi上のフラグ
+        case when lose_date < ifnull(win_date,current_date('Asia/Tokyo')) then 1 end as lose_flg
     from
         pre_flg
 ),
@@ -167,7 +167,7 @@ buyback_unique as(
 ),
 quartely_report as(
     select
-        t1.* except(earnings_title,operating_income_title,ordinaly_profit_title,net_income_title,ordinaly_profit,before_ordinaly_profit,title,inpage_title,xbrl,period_month,omit_flg,xbrl_less_known_flg),
+        t1.* except(earnings_title,operating_income_title,ordinaly_profit_title,net_income_title,ordinaly_profit,before_ordinaly_profit,period_month,omit_flg,xbrl_less_known_flg),
         min(t1.period) over(partition by t1.stock_code) as min_period,
         (t1.net_income - t1.before_net_income)/ nullif(abs(t1.before_net_income),0) as net_income_gain_rate, --前年同期比の純利益増減率
         t1.net_assets / nullif(t1.total_assets,0) as equity_ratio,
@@ -332,6 +332,13 @@ quartely_report_join_tb as(--最新の期が4期でない場合nullとなって�
         max_period_only as t3
         on t1.stock_code = t3.stock_code
 ),
+date_tb as(
+    select
+        distinct
+        created_at
+    from
+        base
+),
 quartely_report_with_increase_num as(--直近で4Qを迎えていない場合、直近の値で各数値を増減させる
     select
         * except(earnings_num,operating_income_num,increase_num,period_null_flg),
@@ -354,13 +361,6 @@ quartely_report_with_increase_num as(--直近で4Qを迎えていない場合、
         end as increase_num --4Qを迎えていない場合最後のincrease_numに値を足す(マイナスなら引く)
     from
         quartely_report_join_tb
-),
-date_tb as(
-    select
-        distinct
-        created_at
-    from
-        base
 ),
 pre_split_tb as(--split_dateが土曜日であることがあるのでsplit_date以降で結合
     select
@@ -439,8 +439,9 @@ data_tb as(--created_at,stock_codeに対し一意
 ),
 base_aggre as(--各テクニカル指標の元となる値を集計
     select t1.* except(split_rate,stock_reward,cum_split_rate),
-        avg(t1.close) over(partition by t1.stock_code order by t1.created_at rows between 6 preceding and current row) as short_avg, --7日間平均 
-        avg(t1.close) over(partition by t1.stock_code order by t1.created_at rows between 27 preceding and current row) as long_avg, --28日間平均
+        avg(t1.close) over(partition by t1.stock_code order by t1.created_at rows between 5 preceding and current row) as close_avg1, --5日間平均 
+        avg(t1.close) over(partition by t1.stock_code order by t1.created_at rows between 20 preceding and current row) as close_avg2, --20日間平均
+        avg(t1.close) over(partition by t1.stock_code order by t1.created_at rows between 60 preceding and current row) as close_avg3, --60日間平均
         lag(t1.close,1) over(partition by t1.stock_code order by t1.created_at) as before_close, --前日の値
         lag(t1.close,2) over(partition by t1.stock_code order by t1.created_at) as before_day3_close, 
         lag(t1.close,3) over(partition by t1.stock_code order by t1.created_at) as before_day4_close, 
@@ -449,6 +450,8 @@ base_aggre as(--各テクニカル指標の元となる値を集計
         lag(t1.close,6) over(partition by t1.stock_code order by t1.created_at) as before_day7_close, --7日前の値
         min(t1.close) over(partition by t1.stock_code order by t1.created_at rows between 6 preceding and current row) as range_min,--直近7日間の最安値,
         max(t1.close) over(partition by t1.stock_code order by t1.created_at rows between 6 preceding and current row) as range_max,--直近7日間の最高値,
+        min(t1.close) over(partition by t1.stock_code order by t1.created_at rows between 13 preceding and current row) as range_min2,--直近7日間の最安値,
+        max(t1.close) over(partition by t1.stock_code order by t1.created_at rows between 13 preceding and current row) as range_max2,--直近7日間の最高値,
         t2.split_rate,
         t1.stock_reward / t1.cum_split_rate as stock_reward, --調整後配当
     from 
@@ -459,7 +462,8 @@ base_aggre as(--各テクニカル指標の元となる値を集計
 ),
 trend_add as(--移動平均のクロスを判別するフラグや各指標の元となる値を引き続き集計
     select * except(split_release_date,running_release_date),
-        case when short_avg >= long_avg then 'upper' else 'lower' end as trend,--7日間平均が28日平均を上回っていればupper
+        case when close_avg1 >= close_avg2 then 'upper' else 'lower' end as trend1,--5日間平均が20日平均を上回っていればupper
+        case when close_avg2 >= close_avg3 then 'upper' else 'lower' end as trend2,
         case when close > before_close then close - before_close else 0 end as gain,
         case when close < before_close then before_close - close else 0 end as loss,
         min(close) over(partition by stock_code order by created_at rows between 60 preceding and current row) as min_60day_close,--直近N日の最安値
@@ -468,6 +472,7 @@ trend_add as(--移動平均のクロスを判別するフラグや各指標の�
         max(close) over(partition by stock_code order by created_at rows between 750 preceding and current row) as max_3year_close,--直近N日の最安値
         min(created_at) over(partition by stock_code) min_dt,
         (close - range_min) / nullif((range_max - range_min),0) as k_value,
+        (close - range_min2) / nullif((range_max2 - range_min2),0) as k_value2,
         ((close - ifnull(before_day7_close,0)) / nullif(before_day7_close,0)) * 100 as roc,
         case when close > before_close then 1 else 0 end as day2_cnt,
         case when close > before_day3_close then 1 else 0 end as day3_cnt,
@@ -482,16 +487,19 @@ trend_add as(--移動平均のクロスを判別するフラグや各指標の�
         end as price_movement,
         date_diff(created_at,running_release_date,day) as release_past_day,
         (close - before_close) / before_close as daily_volatility, --分母は以前はcloseだった
+        lag(stock_reward,1) over(partition by stock_code order by created_at) as before_stock_reward 
     from 
         base_aggre
 ),
 trend_lag_add as(--クロス発生か否かを判別するため、前日のフラグ付与,rsiはここで完成
     select 
         *,
-        lag(trend,1) over(partition by stock_code order by created_at) as before_trend,
+        lag(trend1,1) over(partition by stock_code order by created_at) as before_trend1,
+        lag(trend2,1) over(partition by stock_code order by created_at) as before_trend2,
         avg(gain) over (partition by stock_code order by created_at rows between 13 preceding and current row) as avg_gain,
         avg(loss) over (partition by stock_code order by created_at rows between 13 preceding and current row) as avg_loss,
-        sum(k_value) over(partition by stock_code order by created_at rows between 3 preceding and current row) / 4 as d_value,
+        avg(k_value) over(partition by stock_code order by created_at rows between 2 preceding and current row) as d_value,
+        avg(k_value2) over(partition by stock_code order by created_at rows between 2 preceding and current row) as d_value2,
         count(case when close - before_close > 0 then close end) over(partition by stock_code order by created_at rows between 11 preceding and current row) as upper_days,
         day2_cnt + day3_cnt + day4_cnt + day5_cnt + day6_cnt + day7_cnt +1 as close_rank,
         ifnull(sum(case when price_movement = 'up' then volume else 0 end) over(partition by stock_code order by created_at rows between 19 preceding and current row),0) as up_volume,
@@ -505,17 +513,26 @@ trend_lag_add as(--クロス発生か否かを判別するため、前日のフ�
                     when split_rate >= 5 then 3
             end 
         end as stock_split,
+        case
+            when stock_reward / nullif(before_stock_reward,0) > 1 then 1
+        end as stock_reward_increase_flg,
     from
         trend_add
 ),
 sign_add as(--前日のフラグと異なるなら売買サイン,stcasticksも移動平均と同様クロス判別が必要なのでここでフラグ建て
-    select *,
-    case when trend = 'upper' and before_trend = 'lower' then 1
-         when trend = 'lower' and before_trend = 'upper' then 4
-         when trend = 'upper' then 2
-         when trend = 'lower' then 3
+    select * except(stock_reward_increase_flg),
+    case when trend1 = 'upper' and before_trend1 = 'lower' then 1
+         when trend1 = 'lower' and before_trend1 = 'upper' then 4
+         when trend1 = 'upper' then 2
+         when trend1 = 'lower' then 3
     end as moving_avg,
+    case when trend2 = 'upper' and before_trend2 = 'lower' then 1
+         when trend2 = 'lower' and before_trend2 = 'upper' then 4
+         when trend2 = 'upper' then 2
+         when trend2 = 'lower' then 3
+    end as moving_avg2,
     case when k_value >= d_value then 'upper' else 'lower' end as stocas_trend,
+    case when k_value2 >= d_value2 then 'upper' else 'lower' end as stocas_trend2,
     (upper_days / 12) * 100 as psychological,
     case
         when avg_loss = 0 then 100
@@ -527,25 +544,34 @@ sign_add as(--前日のフラグと異なるなら売買サイン,stcasticksも�
     lag(close_rank,4) over(partition by stock_code order by created_at) as day4_close_rank,
     lag(close_rank,5) over(partition by stock_code order by created_at) as day5_close_rank,
     lag(close_rank,6) over(partition by stock_code order by created_at) as day6_close_rank,
-    ((up_volume + (stay_volume/2)) / nullif((down_volume + (stay_volume/2)),0)) *100 as volume_ratio
+    ((up_volume + (stay_volume/2)) / nullif((down_volume + (stay_volume/2)),0)) *100 as volume_ratio,
+    sum(stock_reward_increase_flg) over(partition by stock_code order by created_at rows between 4 preceding and current row) as stock_reward_increase_flg,
     from  trend_lag_add
 ),
 sign_add2 as(
     select *,
     lag(stocas_trend,1) over(partition by stock_code order by created_at) as before_stocas ,
+    lag(stocas_trend2,1) over(partition by stock_code order by created_at) as before_stocas2 ,
     ifnull(pow((7- close_rank),2),0) + ifnull(pow((6- day1_close_rank),2),0) + ifnull(pow((5- day2_close_rank),2),0) + ifnull(pow((4- day3_close_rank),2),0) + ifnull(pow((3- day4_close_rank),2),0)
     + ifnull(pow((2- day5_close_rank),2),0) + ifnull(pow((1- day6_close_rank),2),0) as rci_d_value
     from sign_add
 ),
 sign_add3 as(
-    select t1.*,
+    select t1.* except(stock_reward_increase_flg),
     case when stocas_trend = 'upper' and before_stocas = 'lower' then 1
          when stocas_trend = 'lower' and before_stocas = 'upper' then 4
          when stocas_trend = 'upper' then 2
          when stocas_trend = 'lower' then 3
     end as stocasticks,
+    case when stocas_trend2 = 'upper' and before_stocas2 = 'lower' then 1
+         when stocas_trend2 = 'lower' and before_stocas2 = 'upper' then 4
+         when stocas_trend2 = 'upper' then 2
+         when stocas_trend2 = 'lower' then 3
+    end as stocasticks2,
     cast((1 - ((rci_d_value * 6) / (7*48))) * 100 as int64) as rci,  --分母はn(nの2乗-1),7日なので7*48
-    close / nullif(long_avg,0) as envelope,
+    close / nullif(close_avg1,0) as short_envelope, 
+    close / nullif(close_avg2,0) as envelope, --20日移動平均に対する移動平均乖離率(default)
+    close / nullif(close_avg3,0) as long_envelope, 
     case
         when date_diff(created_at,min_dt,day) < 60 then null   --N日経過していないならnull
         else close / min_60day_close 
@@ -562,7 +588,8 @@ sign_add3 as(
         when date_diff(created_at,min_dt,day) < 100 then null   --N日経過していないならnull
         else close / max_3year_close 
     end as top_relative_rate,
-    t2.type1
+    t2.type1,
+    case when t1.stock_reward_increase_flg is not null then 1 end as stock_reward_increase_flg
     from 
         sign_add2 as t1
     left join
@@ -593,10 +620,10 @@ point_add as(
         t1.close,
         t1.volume,
         contract_price,--約定値段
+        up_flg,
+        down_flg,
         win_flg,
         lose_flg,
-        display_win_flg,
-        display_lose_flg,
         stock_reward / nullif(close,0) as reward_rate, --調整後利回り
         stock_reward,--調整後配当
        (net_income - last_net_income) / nullif(abs(last_net_income),0) as quarter_net_income_rate,--純利益(前年同期比)
@@ -605,18 +632,28 @@ point_add as(
         roe,--自己資本利益率
         roa,--総資産利益率
         moving_avg,--移動平均
+        moving_avg2, --2025-12-02追加
         rsi,--14日間のRSI
-        stocasticks,
+        stocasticks,--7日間のストキャスティクス
+        k_value,--モデル学習時のみ参照 2025-12-02追加
+        d_value,--モデル学習時のみ参照 2025-12-02追加
+        stocasticks2,--14日間のストキャスティクス 2025-12-02追加
+        k_value2,--モデル学習時のみ参照 2025-12-02追加
+        d_value2,--モデル学習時のみ参照 2025-12-02追加
         volume_ratio,--nullの場合フラグを立てることにした
         psychological,
         roc,
         rci,
-        envelope,
+        short_envelope, --5日間の移動平均乖離率 2025-12-02追加
+        envelope, --20日間の移動平均乖離率
+        long_envelope, --60日間の移動平均乖離率 2025-12-02追加
         bottom_relative_rate,--直近3年の最安値に対する元終値の割合
         top_relative_rate,--同上の最高値
         day60_bottom_relative_rate,
         day60_top_relative_rate,        
-        case when date_diff(t1.created_at,t2.ipo_date,day) <= 365 then 1 else 0 end as ipo_flg, --上場日から直近1年間にフラグ
+        case 
+            when date_diff(t1.created_at,t2.ipo_date,year) <= 2 then date_diff(t1.created_at,t2.ipo_date,year)
+        end as ipo_flg, --上場日から直近1年間にフラグ→直近3年間では実年数
         case 
             when market_cap >= 500000000000 then 'large'
             when market_cap >= 200000000000 then 'mid'
@@ -627,10 +664,10 @@ point_add as(
         supervision_reason,--管理銘柄になっている理由
         supervision_past_day,
         case
-            when long_avg < 50 then 1
-            when long_avg < 300 then 2
-            when long_avg < 1000 then 3
-            when long_avg < 5000 then 4
+            when close_avg2 < 50 then 1
+            when close_avg2 < 300 then 2
+            when close_avg2 < 1000 then 3
+            when close_avg2 < 5000 then 4
             else 5
         end as price_range,--価格帯
         case 
@@ -708,7 +745,7 @@ point_add as(
             else ifnull(increase_num,0)
         end as p8,--連続増益期数による加点(最大3)
         (net_income*1000000/stock_amount) * per as theoretical_close, --理論値株価乖離率
-      
+        stock_reward_increase_flg --増配(5日間) 2025-12-02追加
     from 
         sign_add3 as t1
     left join
@@ -725,9 +762,10 @@ point_sum as(
 market_base as(
     select
         *,
-        stddev_pop(daily_volatility) over(partition by stock_code order by created_at rows between 5 preceding and current row) as std_volatility
+        stddev_pop(daily_volatility) over(partition by stock_code order by created_at rows between 5 preceding and current row) as std_volatility,
+        stddev_pop(daily_volatility) over(partition by stock_code order by created_at rows between 13 preceding and current row) as std_volatility2
     from
-        trend_add
+        trend_lag_add
 ),
 market_daily as(
     select
@@ -735,19 +773,35 @@ market_daily as(
         count(stock_code) as ids,
         count(case when close - before_close > 0 then stock_code end) as up_ids,
         avg(close / nullif(before_close,0) -1) as daily_return,
-        avg(std_volatility) as market_volatility
+        avg(std_volatility) as market_volatility,
+        avg(std_volatility2) as market_volatility2,
+        avg(k_value) as k_value,
+        avg(d_value) as d_value
     from
         market_base
     group by 1
 ),
-market as(
+pre_market as(
     select
         created_at,
         sum(up_ids) over(order by created_at rows between 5 preceding and current row) / sum(ids) over(order by created_at rows between 5 preceding and current row) as market_breath,--上昇銘柄割合(5日平均)
+        sum(up_ids) over(order by created_at rows between 13 preceding and current row) / sum(ids) over(order by created_at rows between 13 preceding and current row) as market_breath2,--上昇銘柄割合(14日平均)
         avg(daily_return) over(order by created_at rows between 5 preceding and current row) as market_return,--前日比平均(5日平均)
-        market_volatility--標準偏差平均ボラティリティ(5日平均)
+        avg(daily_return) over(order by created_at rows between 13 preceding and current row) as market_return2,--前日比平均(14日平均)
+        market_volatility,--標準偏差平均ボラティリティ(5日平均)
+        market_volatility2,--標準偏差平均ボラティリティ(14日平均)
+        case when k_value >= d_value then 1 end as market_stocasticks,
+        avg(daily_return) over(order by created_at rows between 5 preceding and current row) as short_moving_avg, 
+        avg(daily_return) over(order by created_at rows between 20 preceding and current row) as long_moving_avg,
     from
         market_daily
+),
+market as(
+    select
+        * ,
+        case when short_moving_avg >= long_moving_avg then 1 end as market_moving_avg
+    from
+        pre_market
 )
 select
     t1.* except(weather_point),
@@ -771,8 +825,13 @@ select
     else 0
     end theoretical_rate, --理論値株価乖離率
     t2.market_breath,
+    t2.market_breath2, --2025-12-02追加
     t2.market_return,
-    t2.market_volatility
+    t2.market_return2, --2025-12-02追加
+    t2.market_volatility,
+    t2.market_volatility2, --2025-12-02追加
+    t2.market_moving_avg, --2025-12-03追加
+    t2.market_stocasticks --2025-12-03追加
 from
     point_sum as t1
 left join
