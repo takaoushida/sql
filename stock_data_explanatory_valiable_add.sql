@@ -424,7 +424,7 @@ data_tb as(--created_at,stock_codeに対し一意
         *,
         close / nullif(((quarter_net_income*1000000 * 4)/nullif(stock_amount,0)),0) as per,--株価収益率
         close / nullif(((net_assets*1000000)/nullif(stock_amount,0)),0) as pbr,--株価純資産倍率　※2024年版ではnet_assets*1000000*4になっていた,net_assetsは純資産だから四半期ごとの値じゃないので4倍してはいけない
-        (quarter_net_income*1000000 * 4) / ((total_assets*1000000) * nullif((equity_ratio/100),0))  as roe,--自己資本利益率
+        (quarter_net_income*1000000 * 4) / ((total_assets*1000000) * nullif((equity_ratio),0))  as roe,--自己資本利益率
         (quarter_net_income*1000000 * 4) / nullif((total_assets*1000000),0) as roa,--総資産利益率    
         close * stock_amount as market_cap,--時価総額 
         max(split_release_date) over(partition by stock_code order by created_at) as running_release_date,   
@@ -556,6 +556,18 @@ sign_add2 as(
     + ifnull(pow((2- day5_close_rank),2),0) + ifnull(pow((1- day6_close_rank),2),0) as rci_d_value
     from sign_add
 ),
+stock_data_mst_union as(
+    select code,type1 from stock_data_mst.stock_data_mst_tokyo_01 union all
+    select code,type1 from `stock_data_mst.stock_data_mst_tokyo_delisting_*`
+),
+stock_data_mst as(
+    select
+        distinct
+        code,
+        dense_rank() over(order by type1) as type1
+    from
+        stock_data_mst_union
+),
 sign_add3 as(
     select t1.* except(stock_reward_increase_flg),
     case when stocas_trend = 'upper' and before_stocas = 'lower' then 1
@@ -589,11 +601,13 @@ sign_add3 as(
         else close / max_3year_close 
     end as top_relative_rate,
     t2.type1,
-    case when t1.stock_reward_increase_flg is not null then 1 end as stock_reward_increase_flg
+    case when t1.stock_reward_increase_flg is not null then 1 end as stock_reward_increase_flg,
+    stddev_pop(daily_volatility) over(partition by t1.stock_code order by created_at rows between 5 preceding and current row) as std_volatility,
+    stddev_pop(daily_volatility) over(partition by t1.stock_code order by created_at rows between 13 preceding and current row) as std_volatility2
     from 
         sign_add2 as t1
     left join
-        stock_data_mst.stock_data_mst_tokyo_01 as t2
+        stock_data_mst as t2
         on t1.stock_code = t2.code        
 ),
 minkabu_tb as(
@@ -617,6 +631,7 @@ point_add as(
     select
         t1.created_at,
         t1.stock_code,
+        t1.type1,
         t1.close,
         t1.volume,
         contract_price,--約定値段
@@ -635,12 +650,12 @@ point_add as(
         moving_avg2, --2025-12-02追加
         rsi,--14日間のRSI
         stocasticks,--7日間のストキャスティクス
-        k_value,--モデル学習時のみ参照 2025-12-02追加
-        d_value,--モデル学習時のみ参照 2025-12-02追加
+        --k_value,--モデル学習時のみ参照 2025-12-02追加
+        --d_value,--モデル学習時のみ参照 2025-12-02追加
         stocasticks2,--14日間のストキャスティクス 2025-12-02追加
-        k_value2,--モデル学習時のみ参照 2025-12-02追加
-        d_value2,--モデル学習時のみ参照 2025-12-02追加
-        volume_ratio,--nullの場合フラグを立てることにした
+        --k_value2,--モデル学習時のみ参照 2025-12-02追加
+        --d_value2,--モデル学習時のみ参照 2025-12-02追加
+        volume_ratio,
         psychological,
         roc,
         rci,
@@ -652,7 +667,8 @@ point_add as(
         day60_bottom_relative_rate,
         day60_top_relative_rate,        
         case 
-            when date_diff(t1.created_at,t2.ipo_date,year) <= 2 then date_diff(t1.created_at,t2.ipo_date,year)
+            when date_diff(t1.created_at,t2.ipo_date,year) < 0 then null --ホールディングスになるなどで再上場の場合再上場日を取得している
+            when date_diff(t1.created_at,t2.ipo_date,year) <= 3 then date_diff(t1.created_at,t2.ipo_date,year)
         end as ipo_flg, --上場日から直近1年間にフラグ→直近3年間では実年数
         case 
             when market_cap >= 500000000000 then 'large'
@@ -702,9 +718,9 @@ point_add as(
             when year3_red_count between 6 and 11 then 2
             when year3_red_count >= 12 then 3
         end as year3_red_count,--直近3年間の赤字クオーター数　※累積の純利益から算出,四半期ごとに赤字か否かではない
-        earnings_num,--連続売上維持期数
-        operating_income_num,--連続営業利益率維持期数
-        equity_ratio, --自己資本比率
+        --earnings_num,--連続売上維持期数
+        --operating_income_num,--連続営業利益率維持期数
+        --equity_ratio, --自己資本比率
         case 
             when equity_ratio >=0.5 then 2
             when equity_ratio >= 0.3 then 1
@@ -759,37 +775,19 @@ point_sum as(
     from
         point_add
 ),
-market_base as(
-    select
-        *,
-        stddev_pop(daily_volatility) over(partition by stock_code order by created_at rows between 5 preceding and current row) as std_volatility,
-        stddev_pop(daily_volatility) over(partition by stock_code order by created_at rows between 13 preceding and current row) as std_volatility2
-    from
-        trend_lag_add
-),
 market_daily as(
     select
         created_at,
-        count(stock_code) as ids,
-        count(case when close - before_close > 0 then stock_code end) as up_ids,
         avg(close / nullif(before_close,0) -1) as daily_return,
-        avg(std_volatility) as market_volatility,
-        avg(std_volatility2) as market_volatility2,
         avg(k_value) as k_value,
-        avg(d_value) as d_value
+        avg(d_value) as d_value,
     from
-        market_base
+        sign_add3
     group by 1
 ),
 pre_market as(
     select
-        created_at,
-        sum(up_ids) over(order by created_at rows between 5 preceding and current row) / sum(ids) over(order by created_at rows between 5 preceding and current row) as market_breath,--上昇銘柄割合(5日平均)
-        sum(up_ids) over(order by created_at rows between 13 preceding and current row) / sum(ids) over(order by created_at rows between 13 preceding and current row) as market_breath2,--上昇銘柄割合(14日平均)
-        avg(daily_return) over(order by created_at rows between 5 preceding and current row) as market_return,--前日比平均(5日平均)
-        avg(daily_return) over(order by created_at rows between 13 preceding and current row) as market_return2,--前日比平均(14日平均)
-        market_volatility,--標準偏差平均ボラティリティ(5日平均)
-        market_volatility2,--標準偏差平均ボラティリティ(14日平均)
+        *,
         case when k_value >= d_value then 1 end as market_stocasticks,
         avg(daily_return) over(order by created_at rows between 5 preceding and current row) as short_moving_avg, 
         avg(daily_return) over(order by created_at rows between 20 preceding and current row) as long_moving_avg,
@@ -802,15 +800,43 @@ market as(
         case when short_moving_avg >= long_moving_avg then 1 end as market_moving_avg
     from
         pre_market
+),
+industory_daily as(
+    select
+        created_at,
+        type1,
+        avg(close / nullif(before_close,0) -1) as daily_return,
+        avg(k_value) as k_value,
+        avg(d_value) as d_value,
+        avg(rsi) as industory_rsi
+    from
+        sign_add3
+    group by 1,2
+),
+pre_industory as(
+    select
+        *,
+        case when k_value >= d_value then 1 end as industory_stocasticks,
+        avg(daily_return) over(order by created_at rows between 5 preceding and current row) as short_moving_avg, 
+        avg(daily_return) over(order by created_at rows between 20 preceding and current row) as long_moving_avg,
+    from
+        industory_daily
+),
+industory as(
+    select
+        * ,
+        case when short_moving_avg >= long_moving_avg then 1 end as industory_moving_avg
+    from
+        pre_industory
 )
 select
     t1.* except(weather_point),
     case 
-        when weather_point <= 1 then 'thunder'
-        when weather_point <= 5 then 'rain'
-        when weather_point <= 10 then 'cloudy'
-        when weather_point <= 16 then 'partly_cloudy'
-        when weather_point >= 17 then 'sun'
+        when weather_point <= 1 then 1 --'thunder'
+        when weather_point <= 5 then 2 --'rain'
+        when weather_point <= 10 then 3 --'cloudy'
+        when weather_point <= 16 then 4 --'partly_cloudy'
+        when weather_point >= 17 then 5 --'sun'
     end as weather,--ここ将来数字に変えよう
   case 
     when theoretical_close < -1000 then 1
@@ -823,20 +849,18 @@ select
     when theoretical_close < 100 then 8
     when theoretical_close >= 100 then 9
     else 0
-    end theoretical_rate, --理論値株価乖離率
-    t2.market_breath,
-    t2.market_breath2, --2025-12-02追加
-    t2.market_return,
-    t2.market_return2, --2025-12-02追加
-    t2.market_volatility,
-    t2.market_volatility2, --2025-12-02追加
+    end theoretical_rate, --対理論値割合、割合になってないので直さねばならない　close / theoretical_close でわけないと   
     t2.market_moving_avg, --2025-12-03追加
-    t2.market_stocasticks --2025-12-03追加
+    t2.market_stocasticks, --2025-12-03追加
+    t3.industory_moving_avg, --2025-12-03追加
+    t3.industory_stocasticks, --2025-12-03追加
 from
     point_sum as t1
 left join
     market as t2
     on t1.created_at = t2.created_at
-
+left join
+    industory as t3
+    on t1.created_at = t3.created_at and t1.type1 = t3.type1
 );
 
