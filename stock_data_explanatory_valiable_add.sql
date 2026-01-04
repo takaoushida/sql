@@ -602,8 +602,6 @@ sign_add3 as(
     end as top_relative_rate,
     t2.type1,
     case when t1.stock_reward_increase_flg is not null then 1 end as stock_reward_increase_flg,
-    stddev_pop(daily_volatility) over(partition by t1.stock_code order by created_at rows between 5 preceding and current row) as std_volatility,
-    stddev_pop(daily_volatility) over(partition by t1.stock_code order by created_at rows between 13 preceding and current row) as std_volatility2
     from 
         sign_add2 as t1
     left join
@@ -817,8 +815,8 @@ pre_industory as(
     select
         *,
         case when k_value >= d_value then 1 end as industory_stocasticks,
-        avg(daily_return) over(order by created_at rows between 5 preceding and current row) as short_moving_avg, 
-        avg(daily_return) over(order by created_at rows between 20 preceding and current row) as long_moving_avg,
+        avg(daily_return) over(partition by type1 order by created_at rows between 5 preceding and current row) as short_moving_avg, 
+        avg(daily_return) over(partition by type1 order by created_at rows between 20 preceding and current row) as long_moving_avg,
     from
         industory_daily
 ),
@@ -838,18 +836,7 @@ select
         when weather_point <= 16 then 4 --'partly_cloudy'
         when weather_point >= 17 then 5 --'sun'
     end as weather,--ここ将来数字に変えよう
-  case 
-    when theoretical_close < -1000 then 1
-    when theoretical_close < -100 then 2
-    when theoretical_close < -10 then 3
-    when theoretical_close < -5 then 4
-    when theoretical_close < -2 then 5
-    when theoretical_close < 0.5 then 6
-    when theoretical_close < 0.75 then 7
-    when theoretical_close < 100 then 8
-    when theoretical_close >= 100 then 9
-    else 0
-    end theoretical_rate, --対理論値割合、割合になってないので直さねばならない　close / theoretical_close でわけないと   
+    close / nullif(theoretical_close,0) as theoretical_rate,--対理論値割合
     t2.market_moving_avg, --2025-12-03追加
     t2.market_stocasticks, --2025-12-03追加
     t3.industory_moving_avg, --2025-12-03追加
