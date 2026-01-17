@@ -26,8 +26,7 @@ for tables in(
             delisting_dataset as t2
             on t1.stock_code = t2.stock_code
         where   
-            t1.stock_code = t2.stock_code            
-            and t1.end_date >= date_add(current_date('Asia/Tokyo'),interval - 7 day)
+            t1.end_date >= date_add(current_date('Asia/Tokyo'),interval - 7 day)
             and t2.stock_code is null
     ),
     tokyo_01 as(
