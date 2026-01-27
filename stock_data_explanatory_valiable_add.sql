@@ -758,8 +758,8 @@ point_add as(
             when increase_num < 0 then 0
             else ifnull(increase_num,0)
         end as p8,--連続増益期数による加点(最大3)
-        (net_income*1000000/stock_amount) * per as theoretical_close, --理論値株価乖離率
-        stock_reward_increase_flg --増配(5日間) 2025-12-02追加
+        stock_reward_increase_flg, --増配(5日間) 2025-12-02追加
+        case when t1.net_income > 0 then 1 end as profit_flg,
     from 
         sign_add3 as t1
     left join
@@ -773,14 +773,26 @@ point_sum as(
     from
         point_add
 ),
+market_base as(
+    select
+        *,
+        stddev_pop(daily_volatility) over(partition by stock_code order by created_at rows between 5 preceding and current row) as std_volatility,
+        stddev_pop(daily_volatility) over(partition by stock_code order by created_at rows between 13 preceding and current row) as std_volatility2
+    from
+        sign_add3        
+),
 market_daily as(
     select
         created_at,
+        count(stock_code) as ids,
         avg(close / nullif(before_close,0) -1) as daily_return,
+        count(case when close - before_close > 0 then stock_code end) as up_ids,
         avg(k_value) as k_value,
-        avg(d_value) as d_value,
+        avg(d_value) as d_value,        
+        avg(std_volatility) as market_volatility,
+        avg(std_volatility2) as market_volatility2,
     from
-        sign_add3
+        market_base
     group by 1
 ),
 pre_market as(
@@ -789,6 +801,10 @@ pre_market as(
         case when k_value >= d_value then 1 end as market_stocasticks,
         avg(daily_return) over(order by created_at rows between 5 preceding and current row) as short_moving_avg, 
         avg(daily_return) over(order by created_at rows between 20 preceding and current row) as long_moving_avg,
+        sum(up_ids) over(order by created_at rows between 5 preceding and current row) / sum(ids) over(order by created_at rows between 5 preceding and current row) as market_breath,--上昇銘柄割合(5日平均)
+        sum(up_ids) over(order by created_at rows between 13 preceding and current row) / sum(ids) over(order by created_at rows between 13 preceding and current row) as market_breath2,--上昇銘柄割合(14日平均)
+        avg(daily_return) over(order by created_at rows between 5 preceding and current row) as market_return,--前日比平均(5日平均)
+        avg(daily_return) over(order by created_at rows between 13 preceding and current row) as market_return2,--前日比平均(14日平均)
     from
         market_daily
 ),
@@ -806,7 +822,6 @@ industory_daily as(
         avg(close / nullif(before_close,0) -1) as daily_return,
         avg(k_value) as k_value,
         avg(d_value) as d_value,
-        avg(rsi) as industory_rsi
     from
         sign_add3
     group by 1,2
@@ -836,9 +851,14 @@ select
         when weather_point <= 16 then 4 --'partly_cloudy'
         when weather_point >= 17 then 5 --'sun'
     end as weather,--ここ将来数字に変えよう
-    close / nullif(theoretical_close,0) as theoretical_rate,--対理論値割合
     t2.market_moving_avg, --2025-12-03追加
     t2.market_stocasticks, --2025-12-03追加
+    t2.market_breath,
+    t2.market_breath2, --2025-12-02追加
+    t2.market_return,
+    t2.market_return2, --2025-12-02追加
+    t2.market_volatility,
+    t2.market_volatility2, --2025-12-02追加
     t3.industory_moving_avg, --2025-12-03追加
     t3.industory_stocasticks, --2025-12-03追加
 from
