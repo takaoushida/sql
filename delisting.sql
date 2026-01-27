@@ -1,6 +1,7 @@
 DECLARE stock_code STRING;
 DECLARE suffix STRING;
 
+
 for tables in(
     with
     delisting_mst as(
@@ -13,9 +14,9 @@ for tables in(
     delisting_dataset as(
         select
             distinct
-            _table_suffix as stock_code
+            replace(table_id,'delisting_','') as stock_code
         from    
-            `stock_data_delisting.delisting_*`
+            stock_data_delisting.__TABLES__
     ),
     dataless_delisting as(
         select  
@@ -25,17 +26,19 @@ for tables in(
         left join
             delisting_dataset as t2
             on t1.stock_code = t2.stock_code
-        where   
-            t1.end_date >= date_add(current_date('Asia/Tokyo'),interval - 7 day)
-            and t2.stock_code is null
+        where  
+            t2.stock_code is null
     ),
     tokyo_01 as(
         select
             distinct
-            _table_suffix as suffix_date
+            replace(table_id,'tokyo_01_','') as suffix_date,
+
+
         from
-            `stock_data.tokyo_01_*`
-        where parse_date('%Y%m%d',_table_suffix) >= date_add(current_date('Asia/Tokyo'),interval - 10 day)
+            stock_data.__TABLES__
+        where
+            table_id like '%tokyo_01_%'
     )
     select
         t1.stock_code,
@@ -59,8 +62,14 @@ for tables in(
                 where
                     stock_code = '%s'
             )
-            """, 
+            """,
         tables.stock_code,tables.suffix,tables.stock_code
         );
 end for;
+
+
+
+
+
+
 
