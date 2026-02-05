@@ -17,12 +17,20 @@ final_data as(--最終的なperiod,quarterの値のみにする
     where
         row_number = 1
 ),
+stock_amount_lead_add as(
+    select
+        *,
+        lead(stock_amount) over(partition by stock_code order by release_date) as next_stock_amount,
+        lag(stock_reward) over(partition by stock_code order by release_date) as before_stock_reward
+    from
+        final_data
+),
 exp_ln_base as(--株式分割を結合
     select
         t1.*,
         (t2.split_stock_amount + t2.exist_stock_amount) / t2.exist_stock_amount as split_rate,
     from
-        final_data as t1
+        stock_amount_lead_add as t1
     left join
         `stock_data.stock_split_*` as t2
         on t1.stock_code = t2.stock_code and t2.split_date between t1.join_start_date and t1.join_end_date
@@ -45,7 +53,7 @@ cum_split_add as(--逆累積にし、当時の1株が今の何株になるかを
             ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
         )) AS cum_split_rate --利回りを調整後利回りにするための累積値
     from
-        final_data as t1
+        stock_amount_lead_add as t1
     left join
         daily_change as t2
         on t1.stock_code = t2.stock_code and t1.release_date = t2.release_date
@@ -61,7 +69,17 @@ lag_add as(--lagを付与しつつ調整後配当を取得
         lag(before_operating_income,1) over(partition by stock_code,period order by quarter) as lag_before_operating_income,
         lag(before_ordinaly_profit,1) over(partition by stock_code,period order by quarter) as lag_before_ordinaly_profit,
         lag(before_net_income,1) over(partition by stock_code,period order by quarter) as lag_before_net_income,
-        stock_reward / cum_split_rate as refine_stock_reward
+        case 
+            when next_stock_amount is null or before_stock_reward is null then stock_reward / cum_split_rate 
+            when next_stock_amount / stock_amount >= 1.2 and  before_stock_reward / nullif(stock_reward,0) >= 1.2 --次回の発行済み株式数が現在より1.2倍以上=株式分割　かつ前回の配当が現在より1.2倍以上=既に分割後の配当になってる
+            then stock_reward 
+            else stock_reward / cum_split_rate 
+        end as refine_stock_reward,--biで表示するための調整後配当
+        case 
+            when next_stock_amount / stock_amount >= 1.2 and  before_stock_reward / nullif(stock_reward,0) >= 1.2 --次回の発行済み株式数が現在より1.2倍以上=株式分割　かつ前回の配当が現在より1.2倍以上=既に分割後の配当になってる
+            then stock_reward  *(next_stock_amount / stock_amount)
+            else stock_reward
+        end as non_cum_stock_reward
     from
         cum_split_add
 ),
@@ -113,6 +131,7 @@ select
     stock_amount,--発行済株式数
     stock_reward,--配当
     refine_stock_reward,--調整後配当
+    non_cum_stock_reward,--特徴量テーブル用の配当
     earnings,--売上(累積)
     operating_income,--営業利益(累積)
     ordinaly_profit,--経常利益(累積)
