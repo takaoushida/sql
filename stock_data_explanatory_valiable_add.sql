@@ -608,22 +608,11 @@ sign_add3 as(
         stock_data_mst as t2
         on t1.stock_code = t2.code        
 ),
-minkabu_tb as(
-    select 
-        *,
-        _table_suffix as suffix,
-        max(_table_suffix) over() as max_suffix 
-    from 
-        `finance_datamart.minkabu_light_*`
-    where parse_date('%Y%m%d',_table_suffix) between date_add(current_date('Asia/Tokyo'),interval -7 day) and current_date('Asia/Tokyo')
-),
 minkabu as (
     select
         *
     from
-        minkabu_tb
-    where
-        suffix = max_suffix
+        stock_data_mst.ipo_date_tb
 ),
 point_add as(
     select
@@ -764,7 +753,7 @@ point_add as(
         sign_add3 as t1
     left join
         minkabu as t2
-        on t1.stock_code = t2.stock_code
+        on t1.stock_code = t2.code
 ),
 point_sum as(
     select
