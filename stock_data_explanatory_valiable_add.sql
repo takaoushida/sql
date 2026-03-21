@@ -753,7 +753,7 @@ point_add as(
         sign_add3 as t1
     left join
         minkabu as t2
-        on t1.stock_code = t2.code
+        on t1.stock_code = t2.stock_code
 ),
 point_sum as(
     select
