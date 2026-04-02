@@ -4,7 +4,7 @@ cluster by stock_code as(
 with
 stock_data as(
     select * from looker_datamart.stock_data_explanatory_valiable_add
-    where created_at >= '2016-06-01' 
+    where created_at >= '2016-06-01'
 ),
 joint_tb as(
     select
@@ -25,68 +25,24 @@ suggest_add as(
     select
         *,
         case
-            when
-                pbr >= 0
-                and forcast_up_rate >= 0.9
-                and forcast_down_rate < 0.1
-                and supervision_reason is null
-                and irregular_flg is null
-                and stock_split in(2,3)
-            then '株式分割'
-            when pbr >= 0
-                and forcast_up_rate >= 0.9
-                and forcast_down_rate < 0.1
-                and supervision_reason is null
-                and irregular_flg is null
-                and reward_rate >= 0.04
-            then '高配当'
-            when
-                pbr >= 0
-                and forcast_up_rate >= 0.9
-                and forcast_down_rate < 0.1
-                and supervision_reason is null
-                and irregular_flg is null
-                and weather in(4,5)
-            then '優良企業'
-            when
-                pbr >= 0
-                and forcast_up_rate >= 0.9
-                and forcast_down_rate < 0.1
-                and supervision_reason is null
-                and irregular_flg is null
-            then '確率のみ'
+            when pbr >= 0 and forcast_up_rate >= 0.9 and forcast_down_rate < 0.1 and supervision_reason is null and irregular_flg is null then
+            case
+                when stock_split in(2,3) then '株式分割'
+                when buyback_flg = 1         then '自社株買'
+                when reward_rate >= 0.04     then '高配当'                
+                when weather in(4,5)         then '優良企業'                
+            end
+            else '確率のみ'
         end as suggest_type,
         case
-            when
-                pbr >= 0
-                and forcast_up_rate >= 0.9
-                and forcast_down_rate < 0.1
-                and supervision_reason is null
-                and irregular_flg is null
-                and stock_split in(2,3)
-            then 1
-            when pbr >= 0
-                and forcast_up_rate >= 0.9
-                and forcast_down_rate < 0.1
-                and supervision_reason is null
-                and irregular_flg is null
-                and reward_rate >= 0.04
-            then 2
-            when
-                pbr >= 0
-                and forcast_up_rate >= 0.9
-                and forcast_down_rate < 0.1
-                and supervision_reason is null
-                and irregular_flg is null
-                and weather in(4,5)
-            then 3
-            when
-                pbr >= 0
-                and forcast_up_rate >= 0.9
-                and forcast_down_rate < 0.1
-                and supervision_reason is null
-                and irregular_flg is null
-            then 4
+            when pbr >= 0 and forcast_up_rate >= 0.9 and forcast_down_rate < 0.1 and supervision_reason is null and irregular_flg is null then
+            case
+                when stock_split in(2,3) then 1
+                when buyback_flg = 1         then 2
+                when reward_rate >= 0.04     then 3                
+                when weather in(4,5)         then 4                
+            end
+            else '確率のみ'
         end as suggest_sort,
         date_diff(created_at,min_dt,day) as past_day
     from
@@ -98,4 +54,9 @@ select
 from
     suggest_add
 )
+
+
+
+
+
 
