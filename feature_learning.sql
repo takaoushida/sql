@@ -11,7 +11,7 @@ joint_tb as(
         t1.*,
         t2.forcast_up_rate,
         t3.forcast_down_rate,
-        min(t1.created_at) over(partition by t1.stock_code) as min_dt
+        row_number() over(partition by t1.stock_code order by t1.created_at) as row_number
     from
         stock_data  as t1
     left join
@@ -30,9 +30,9 @@ suggest_add as(
                 when stock_split in(2,3) then '株式分割'
                 when buyback_flg = 1         then '自社株買'
                 when reward_rate >= 0.04     then '高配当'                
-                when weather in(4,5)         then '優良企業'                
-            end
-            else '確率のみ'
+                when weather in(4,5)         then '優良企業'  
+                else '確率のみ'              
+            end            
         end as suggest_type,
         case
             when pbr >= 0 and forcast_up_rate >= 0.9 and forcast_down_rate < 0.1 and supervision_reason is null and irregular_flg is null then
@@ -40,18 +40,17 @@ suggest_add as(
                 when stock_split in(2,3) then 1
                 when buyback_flg = 1         then 2
                 when reward_rate >= 0.04     then 3                
-                when weather in(4,5)         then 4                
+                when weather in(4,5)         then 4  
+                else 5              
             end
-            else '確率のみ'
-        end as suggest_sort,
-        date_diff(created_at,min_dt,day) as past_day
+        end as suggest_sort
     from
         joint_tb
 ),
 lag_add as(
     select
         *,
-        lag(row_number,1) over(partition by stock_code,suggest order by created_at) as last_row_number
+        lag(row_number,1) over(partition by stock_code,suggest_type order by created_at) as last_row_number
     from
         suggest_add
 )
@@ -61,6 +60,16 @@ select
 from
     lag_add
 )
+
+
+
+
+
+
+
+
+
+
 
 
 
