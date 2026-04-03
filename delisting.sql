@@ -1,7 +1,6 @@
 DECLARE stock_code STRING;
 DECLARE suffix STRING;
 
-
 for tables in(
     with
     delisting_mst as(
@@ -10,6 +9,19 @@ for tables in(
             end_date
         from
             `stock_data_mst.delisting_20*`
+        union all
+        --合併などは上場廃止アナウンスには載らない
+        select 
+            t1.stock_code,
+            cast(replace(t1.delisting_date,'/','-') as date) as end_date
+        from    
+            `stock_data_mst.delisting_reason*` as t1
+        left join  
+            `stock_data_mst.delisting_20*` as t2
+            on t1.stock_code = t2.stock_code
+        where   
+            t2.stock_code is null
+            and cast(replace(t1.delisting_date,'/','-') as date) >= '2025-05-01'
     ),
     delisting_dataset as(
         select
@@ -26,14 +38,13 @@ for tables in(
         left join
             delisting_dataset as t2
             on t1.stock_code = t2.stock_code
-        where  
+        where   
             t2.stock_code is null
     ),
     tokyo_01 as(
         select
             distinct
             replace(table_id,'tokyo_01_','') as suffix_date,
-
 
         from
             stock_data.__TABLES__
@@ -62,14 +73,8 @@ for tables in(
                 where
                     stock_code = '%s'
             )
-            """,
+            """, 
         tables.stock_code,tables.suffix,tables.stock_code
         );
 end for;
-
-
-
-
-
-
 
