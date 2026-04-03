@@ -47,12 +47,19 @@ suggest_add as(
         date_diff(created_at,min_dt,day) as past_day
     from
         joint_tb
+),
+lag_add as(
+    select
+        *,
+        lag(row_number,1) over(partition by stock_code,suggest order by created_at) as last_row_number
+    from
+        suggest_add
 )
 select
     *,
-    count(stock_code) over(partition by stock_code,suggest_type order by past_day range between 120 preceding and current row) as dual_num
+    case when last_row_number is null or row_number - last_row_number != 1 then 1 end as dual_num
 from
-    suggest_add
+    lag_add
 )
 
 
