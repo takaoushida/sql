@@ -1,4 +1,4 @@
-create or replace table temp_folder.all_summary 
+create or replace table temp_folder.all_summary
 partition by release_date
 cluster by stock_code as(
 select
@@ -20,24 +20,33 @@ from
 );
 
 
+
+
 create or replace table jpx.refine_securities_report_master
 cluster by stock_code as(
 with
 stock_codes as(--プロマーケットなどのデータも入っているので'グロース','スタンダード','プライム'に限定
     select
         distinct
-        code as stock_code
+        code as stock_code,
     from
         `stock_data_mst.stock_data_mst_tokyo_01`
     union distinct
     select
         stock_code
     from
-        `stock_data_mst.delisting_*`
+        `stock_data_mst.delisting_20*`
+    where  
+        stock_code != 'None' and omit_flg is not null
+    union distinct
+    select
+        stock_code
+    from
+        `stock_data_mst.delisting_reason*`
     where
-        market_category in('グロース','スタンダード','プライム')
+        market_category in('グロース','スタンダード','プライム')    
 ),
-stock_data as(
+stock_data as(--ETFなどのデータも入ってるので上場銘柄のみにする
     select
         t1.*
     from
@@ -63,7 +72,8 @@ space_cut as(--漢字の数値を置換
             not regexp_contains(title,r'資料|訂正|変更|再登録|追加|超えること|差替|キャッシュ・フロー計算書|DATABOOK|Q&A|PDF|について|お知らせ|サマリー|高い関心|データ集|推移表|~|FAQ|記者会見|報告会|取り組み|説明|書き起こし')--xbrlがなく、これらのキーワードを含んでいないなら決算短信
             and title not like '%報告' and title not like '%報告書' --報告で終わるタイトルは決算短信ではない
             and title not like '%決算' --決算で終わるタイトルは決算短信ではない ※[日本基準]などついているはず
-        ) 
+        )
+
 
 ),
 period_add as(--西暦,決算月,quarterを取得
@@ -214,15 +224,15 @@ spreadsheet_add as(
     left join
         spreadsheet_link.xbrl_less_summary as t3
         on t1.stock_code = t3.stock_code and t1.release_date = t3.release_date and t1.title = t3.title
-    where 
+    where
         t2.omit_flg is null
 ),
 nonrefine_next_add as(--訂正を除き、次回公開日を付与
     select
         *,
         case
-            when refine_flg is null then 
-            lead(release_date,1) over(partition by stock_code,refine_flg order by release_date) 
+            when refine_flg is null then
+            lead(release_date,1) over(partition by stock_code,refine_flg order by release_date)
         end as nonrefine_next_release_date,--訂正を除いた次回公開日
     from
         spreadsheet_add
@@ -258,7 +268,7 @@ only_start_date as (
         *
     from
         row_number_add
-    where 
+    where
         join_start_date is not null
 ),
 self_join as(
@@ -278,10 +288,10 @@ end_add as(
             when join_start_date >= join_end_date then null --その日のうちに訂正が出た場合同じ日が来る
             else join_start_date
         end as join_start_date,
-        case 
-            when join_start_date >= join_end_date then null 
+        case
+            when join_start_date >= join_end_date then null
             when join_start_date is null then null  --次期公開日より後だった場合nullとなり結合しない、だからend_dateも見た目のためnullにしておく
-            else ifnull(date_add(join_end_date,interval -1 day),current_date('Asia/Tokyo')) 
+            else ifnull(date_add(join_end_date,interval -1 day),current_date('Asia/Tokyo'))
         end as join_end_date,
     from
         self_join
@@ -291,3 +301,7 @@ select
 from
     end_add
 )
+
+
+
+
