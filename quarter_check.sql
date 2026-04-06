@@ -1,15 +1,18 @@
 with
 count_tb as(
     select
-        stock_code,
-        period,
-        count(quarter) as q_cnt,
-        max(quarter) as max_quarter,
-        sum(change_flg) as change_flg
+        t1.stock_code,
+        t1.period,
+        count(t1.quarter) as q_cnt,
+        max(t1.quarter) as max_quarter,
+        sum(t1.change_flg) as change_flg
     from
-        jpx.refine_securities_report_master
+        jpx.refine_securities_report_master as t1
+    left join
+        spreadsheet_link.rename_sheet as t2
+        on t1.stock_code = t2.stock_code and t1.release_date = t2.release_date and t1.title = t2.title
     where
-        refine_flg is null
+        t1.refine_flg is null and t2.omit_flg is null
     group by 1,2
 ),
 min_add as(
@@ -22,16 +25,23 @@ min_add as(
 stock_datas as(
     select
         distinct
-        code as stock_code
+        code as stock_code,
     from
         `stock_data_mst.stock_data_mst_tokyo_01`
     union distinct
     select
         stock_code
     from
-        `stock_data_mst.delisting_*`
+        `stock_data_mst.delisting_20*`
+    where   
+        stock_code != 'None' and omit_flg is not null
+    union distinct
+    select
+        stock_code
+    from
+        `stock_data_mst.delisting_reason*`
     where
-        market_category in('グロース','スタンダード','プライム')
+        market_category in('グロース','スタンダード','プライム')   
 ),
 errors as(--期数がおかしい銘柄の年度
     select

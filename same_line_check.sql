@@ -16,16 +16,23 @@ errors as(
 stock_codes as(--プロマーケットなどのデータも入っているので'グロース','スタンダード','プライム'に限定
     select
         distinct
-        code as stock_code
+        code as stock_code,
     from
         `stock_data_mst.stock_data_mst_tokyo_01`
     union distinct
     select
         stock_code
     from
-        `stock_data_mst.delisting_*`
+        `stock_data_mst.delisting_20*`
+    where   
+        stock_code != 'None' and omit_flg is not null
+    union distinct
+    select
+        stock_code
+    from
+        `stock_data_mst.delisting_reason*`
     where
-        market_category in('グロース','スタンダード','プライム')
+        market_category in('グロース','スタンダード','プライム')   
 ),
 stock_data as(
     select
@@ -205,5 +212,5 @@ inner join
     errors as t2
     using(stock_code,period_month,period,quarter)
 where 
-    t1.refine_flg is null and t1.change_flg is null
+    t1.refine_flg is null and t1.change_flg is null and t1.omit_flg is null
 order by 1,2,4,5,6
