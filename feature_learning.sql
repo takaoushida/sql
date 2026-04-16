@@ -13,6 +13,7 @@ stock_data as(
         roe,
         pbr,
         per,
+        stock_reward,
         reward_rate,
         win_flg,
         lose_flg,
