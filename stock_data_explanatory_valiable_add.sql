@@ -57,7 +57,7 @@ cluster by stock_code as(
             * except(date),
             cast(date as date) as created_at,
         from
-            `stock_data_delisting.*`
+            stock_data.delisting_tables
     ),
     delisting_stock_code as(
         select
