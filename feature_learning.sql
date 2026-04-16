@@ -3,8 +3,29 @@ partition by created_at
 cluster by stock_code as(
 with
 stock_data as(
-    select * from looker_datamart.stock_data_explanatory_valiable_add
-    where created_at >= '2016-06-01'
+    select 
+        created_at,
+        stock_code,
+        close,
+        volume,
+        quarter_net_income_rate,
+        roa,
+        roe,
+        pbr,
+        per,
+        reward_rate,
+        win_flg,
+        lose_flg,
+        weather,
+        supervision_reason,
+        ipo_flg,
+        irregular_flg,
+        stock_split,
+        buyback_flg
+    from 
+        looker_datamart.stock_data_explanatory_valiable_add
+    where 
+        created_at >= '2016-06-01'
 ),
 joint_tb as(
     select
@@ -56,20 +77,10 @@ lag_add as(
 )
 select
     *,
-    case when last_row_number is null or row_number - last_row_number != 1 then 1 end as dual_num
+    case when (last_row_number is null or row_number - last_row_number >= 3) and suggest_type is not null then 1 end as dual_num
 from
     lag_add
 )
-
-
-
-
-
-
-
-
-
-
 
 
 
