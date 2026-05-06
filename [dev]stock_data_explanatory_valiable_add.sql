@@ -476,7 +476,8 @@ split_add as(
         t4.buyback_flg,
         t5.supervision_reason,
         t5.release_date as supervision_release_date,
-        row_number() over(partition by t1.stock_code,t6.split_date order by t1.stock_code) as split_row_num
+        row_number() over(partition by t1.stock_code,t6.split_date order by t1.stock_code) as split_row_num,
+        t6.split_date as real_split_date
     from
         temp_folder.dev_stock_data_flg_add as t1
     left join
