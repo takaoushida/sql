@@ -1,3 +1,12 @@
+/*
+2025-04-23変更点
+調整後株価で時価総額を出していたが、株式分割により値が実情と差分が生じるため、調整前株価を復元し、時価総額を算出
+株式分割後、次回決算短信まで発行済み株数が株式分割による増加を加味できていなかったためそれを加味
+python側としては
+株式分割の分割で増える株数が分割後の株数になっている銘柄が確認されたため前者で統一
+上場廃止企業の株式分割が取得できていなかったため取得するようにした
+
+*/
 DECLARE stock_code STRING;
 DECLARE suffix STRING;
 --上場廃止銘柄のテーブルがワイルドカードだとメモリオーバーになるので1枚のテーブルにする
@@ -155,9 +164,8 @@ create or replace table temp_folder.quartely_report_with_increase_num as
 with
 quartely_report as(
     select
-        t1.* except(earnings_title,operating_income_title,ordinaly_profit_title,net_income_title,ordinaly_profit,before_ordinaly_profit,period_month,omit_flg,xbrl_less_known_flg,stock_reward),
-        min(t1.period) over(partition by t1.stock_code) as min_period,
-        (t1.net_income - t1.before_net_income)/ nullif(abs(t1.before_net_income),0) as net_income_gain_rate, --前年同期比の純利益増減率
+        t1.* except(earnings_title,operating_income_title,ordinaly_profit_title,net_income_title,period_month,omit_flg,xbrl_less_known_flg,stock_reward),
+        min(t1.period) over(partition by t1.stock_code) as min_period,        
         t1.net_assets / nullif(t1.total_assets,0) as equity_ratio,
         t2.year3_red_count,
         t2.non_cum_stock_reward as stock_reward
@@ -185,6 +193,9 @@ quartely_report_max_only as(--最終行のみにする
 quartely_report_lag_add as(--前年同期比のために前年同期を付与
     select
         *,
+        lag(earnings) over(partition by stock_code order by release_date) as last_earnings,
+        lag(operating_income) over(partition by stock_code order by release_date) as last_operating_income,
+        lag(ordinaly_profit) over(partition by stock_code order by release_date) as last_ordinaly_profit,
         lag(net_income) over(partition by stock_code order by release_date) as last_net_income --1Q前の純利益
     from
         quartely_report_max_only
@@ -310,11 +321,24 @@ quartely_report_join_tb as(--最新の期が4期でない場合nullとなって�
             when t1.period = t1.min_period and t2.increase_num is null then null
             else coalesce(t2.increase_num,t3.increase_num) 
         end as increase_num,
+        case when t2.stock_code is null then 1 end as period_null_flg, --4Qを迎えていないperiodにフラグが立つ
+        --quarter単体の売上～純利益
+        case 
+            when t1.quarter = 1 then t1.earnings  
+            else t1.earnings - t1.last_earnings
+        end as quarter_earnings,
+        case 
+            when t1.quarter = 1 then t1.operating_income  
+            else t1.operating_income - t1.last_operating_income 
+        end as quarter_operating_income,
+        case 
+            when t1.quarter = 1 then t1.ordinaly_profit  
+            else t1.ordinaly_profit - t1.last_ordinaly_profit 
+        end as quarter_ordinaly_profit,
         case 
             when t1.quarter = 1 then t1.net_income  --1Qはnet_incomeそのものがquarter_net_income
             else t1.net_income - t1.last_net_income --それ以外は直前のnet_incomeとの差分がquarter_net_income
-        end as quarter_net_income,
-        case when t2.stock_code is null then 1 end as period_null_flg, --4Qを迎えていないperiodにフラグが立つ
+        end as quarter_net_income,        
     from
         quartely_report_lag_add as t1
     left join
@@ -323,32 +347,54 @@ quartely_report_join_tb as(--最新の期が4期でない場合nullとなって�
     left join
         max_period_only as t3
         on t1.stock_code = t3.stock_code
+),
+quarter_lag_add as(
+    select
+        * except(earnings_num,operating_income_num,increase_num,period_null_flg,last_earnings,last_operating_income,last_ordinaly_profit,last_net_income),
+        case 
+            when period_null_flg is null then earnings_num
+            when earnings / nullif(before_earnings,0) >= 0.95 then earnings_num +1 
+            else 0
+        end as earnings_num,--直近で4Qを迎えていない場合、直近の値で各数値を増減させる
+        case 
+            when period_null_flg is null then operating_income_num
+            when operating_income / nullif(earnings,0) >= 0.05  then operating_income_num +1 
+            else 0
+        end as operating_income_num,        
+        case 
+            when period_null_flg is null then increase_num --4Qを迎えているならそのまま
+            --4Qを迎えていない場合
+            when increase_num > 0 and net_income - before_net_income >= 0 then increase_num +1 --before_net_incomeは前年同期の純利益,増益中なら前年同期比でプラスならinrease_numが増加
+            when increase_num < 0 and net_income - before_net_income < 0 then increase_num -1  --減益中ならマイナスならincrease_numがさらに減る
+            when net_income - before_net_income >= 0 then 1 --上2行の逆ケース,増益中で減益になったらとその逆,新たに1 or -1から始まる
+            when net_income - before_net_income < 0 then -1
+        end as increase_num, --4Qを迎えていない場合最後のincrease_numに値を足す(マイナスなら引く)
+        sum(quarter_net_income) over(partition by stock_code order by period,quarter rows between 3 preceding and current row) as running_net_income, --年度で閉じない1年間の純利益,roe,roaの分母
+        count(release_date) over(partition by stock_code order by release_date desc) as report_num,
+        lag(quarter_earnings) over(partition by stock_code order by period,quarter) as last_quarter_earnings,
+        lag(quarter_operating_income) over(partition by stock_code order by period,quarter) as last_quarter_operating_income,
+        lag(quarter_ordinaly_profit) over(partition by stock_code order by period,quarter) as last_quarter_ordinaly_profit,
+        lag(quarter_net_income) over(partition by stock_code order by period,quarter) as last_quarter_net_income,
+    from
+        quartely_report_join_tb
 )
---直近で4Qを迎えていない場合、直近の値で各数値を増減させる
 select
-    * except(earnings_num,operating_income_num,increase_num,period_null_flg,last_net_income),
-    case 
-        when period_null_flg is null then earnings_num
-        when earnings / nullif(before_earnings,0) >= 0.95 then earnings_num +1 
-        else 0
-    end as earnings_num,
-    case 
-        when period_null_flg is null then operating_income_num
-        when operating_income / nullif(earnings,0) >= 0.05  then operating_income_num +1 
-        else 0
-    end as operating_income_num,        
-    case 
-        when period_null_flg is null then increase_num --4Qを迎えているならそのまま
-        --4Qを迎えていない場合
-        when increase_num > 0 and net_income - before_net_income >= 0 then increase_num +1 --before_net_incomeは前年同期の純利益,増益中なら前年同期比でプラスならinrease_numが増加
-        when increase_num < 0 and net_income - before_net_income < 0 then increase_num -1  --減益中ならマイナスならincrease_numがさらに減る
-        when net_income - before_net_income >= 0 then 1 --上2行の逆ケース,増益中で減益になったらとその逆,新たに1 or -1から始まる
-        when net_income - before_net_income < 0 then -1
-    end as increase_num, --4Qを迎えていない場合最後のincrease_numに値を足す(マイナスなら引く)
-    sum(quarter_net_income) over(partition by stock_code order by period,quarter rows between 3 preceding and current row) as running_net_income, --年度で閉じない1年間の純利益
-    count(release_date) over(partition by stock_code order by release_date desc) as report_num
+    * except(quarter_earnings,quarter_operating_income,quarter_ordinaly_profit,
+             before_earnings,before_operating_income,before_ordinaly_profit,   last_quarter_earnings,last_quarter_operating_income,last_quarter_ordinaly_profit,last_quarter_net_income
+    ),
+    --前quarter非の経営指標増減率
+    (earnings - last_quarter_earnings) / nullif(abs(last_quarter_earnings),0) as quarter_earnings_rate,
+    (operating_income - last_quarter_operating_income) / nullif(abs(last_quarter_operating_income),0) as quarter_operating_income_rate,
+    (ordinaly_profit - last_quarter_ordinaly_profit) / nullif(abs(last_quarter_ordinaly_profit),0) as quarter_ordinaly_profit_rate,
+    (net_income - last_quarter_net_income) / nullif(abs(last_quarter_net_income),0) as quarter_net_income_rate,--純利益(前quarter比)
+    --前年同期比の経営指標増減率
+    (earnings - before_earnings) / nullif(abs(before_earnings),0) as earnings_rate,
+    (operating_income - before_operating_income) / nullif(abs(before_operating_income),0) as operating_income_rate,
+    (ordinaly_profit - before_ordinaly_profit) / nullif(abs(before_ordinaly_profit),0) as ordinaly_profit_rate,
+    (net_income - before_net_income) / nullif(abs(before_net_income),0) as net_income_rate,--純利益(前年同期比)
 from
-    quartely_report_join_tb;
+    quarter_lag_add
+;
 ##################################################################################################################################################################################################################
 ##################################################################################################################################################################################################################
 create or replace table looker_datamart.stock_data_explanatory_valiable_add
@@ -426,11 +472,12 @@ split_add as(
         t2.* except(stock_code,period),
         (t3.split_stock_amount + t3.exist_stock_amount) / t3.exist_stock_amount as split_rate,--分割率,カテゴリとしては発表日ベース
         t3.release_date as split_release_date,--株式分割発表日
-        (t6.split_stock_amount + t6.exist_stock_amount) / t6.exist_stock_amount as real_split_rate,--実際の分割日ベースの分割率
+        (t6.split_stock_amount + t6.exist_stock_amount) / t6.exist_stock_amount as real_split_rate,--実際の分割日ベースの分割率 split_stock_amount:今回の分割で増加する株式数
         t4.buyback_flg,
         t5.supervision_reason,
         t5.release_date as supervision_release_date,
-        row_number() over(partition by t1.stock_code,t6.split_date order by t1.stock_code) as split_row_num
+        row_number() over(partition by t1.stock_code,t6.split_date order by t1.stock_code) as split_row_num,
+        t6.split_date as real_split_date
     from
         temp_folder.stock_data_flg_add as t1
     left join
@@ -453,6 +500,8 @@ quartely_report_add as(--実際の分割日ベースの分割率を翌営業日�
         distinct
         * except(split_row_num,real_split_rate),
         case when split_row_num = 1 then real_split_rate end as real_split_rate,
+        --決算短信発表後、分割日以降次の決算短信までの、発行済み株式数への分割率適用用のベース分割率、決算短信発表日が分割実施日だった場合、分割後の株式数が記載されるためjoin_start_date != real_split_dateとする
+        case when split_row_num = 1 and join_start_date != real_split_date then real_split_rate end as stock_mount_adjust_split_rate,
     from
         split_add
 ),
@@ -460,10 +509,9 @@ data_tb as(--created_at,stock_codeに対し一意
     select
         *,
         close / nullif(((running_net_income*1000000)/nullif(stock_amount,0)),0) as per,--株価収益率
-        close / nullif(((net_assets*1000000)/nullif(stock_amount,0)),0) as pbr,--株価純資産倍率　
+        close / nullif(((net_assets*1000000)/nullif(stock_amount,0)),0) as pbr,--株価純資産倍率　※2024年版ではnet_assets*1000000*4になっていた,net_assetsは純資産だから四半期ごとの値じゃないので4倍してはいけない
         (running_net_income*1000000) / ((total_assets*1000000) * nullif((equity_ratio),0))  as roe,--自己資本利益率
-        (running_net_income*1000000) / nullif((total_assets*1000000),0) as roa,--総資産利益率    
-        close * stock_amount as market_cap,--時価総額 
+        (running_net_income*1000000) / nullif((total_assets*1000000),0) as roa,--総資産利益率           
         max(split_release_date) over(partition by stock_code order by created_at) as running_release_date,   
         date_diff(created_at,supervision_release_date,day) as supervision_past_day,
         avg(volume) over(partition by stock_code order by created_at rows between 250 preceding and current row) as avg_volume_1y,  --年間出来高平均      
@@ -471,7 +519,12 @@ data_tb as(--created_at,stock_codeに対し一意
             PARTITION BY stock_code
             ORDER BY created_at desc
             ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-        )) AS cum_split_rate --利回りを調整後利回りにするための累積値
+        )) AS cum_split_rate, --利回りを調整後利回りにするための累積値
+        EXP(SUM(LOG(IFNULL(stock_mount_adjust_split_rate,1))) OVER (
+            PARTITION BY stock_code,join_start_date
+            ORDER BY created_at 
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        )) AS final_stock_mount_adjust_split_rate, ----決算短信発表後、分割日以降次の決算短信までの、発行済み株式数への分割率適用用の分割率
     from
         quartely_report_add
 ),
@@ -493,10 +546,11 @@ base_aggre as(--各テクニカル指標の元となる値を集計
         min(t1.close) over(partition by t1.stock_code order by t1.created_at rows between 13 preceding and current row) as range_min2,--直近7日間の最安値,
         max(t1.close) over(partition by t1.stock_code order by t1.created_at rows between 13 preceding and current row) as range_max2,--直近7日間の最高値,
         t2.split_rate,
+        ifnull(lead(t1.cum_split_rate) over(partition by t1.stock_code order by t1.created_at),1) as adjust_split_rate,--調整前株価に戻すためのrate
         case 
             when t1.report_num = 1 then
             last_value(t1.real_split_rate ignore nulls) over(partition by t1.stock_code,t1.quarter,t1.join_start_date order by t1.created_at) 
-        end as last_split_rate,--直近の株式分割率
+        end as last_split_rate,--直近の株式分割率        
         t1.avg_volume_1y / t1.stock_amount as free_float_ratio, --流動株比率
      from 
         data_tb as t1
@@ -506,8 +560,10 @@ base_aggre as(--各テクニカル指標の元となる値を集計
 ),
 cum_split_rate_refine as(
     select
-        * except(last_split_rate,cum_split_rate,stock_reward),
-        stock_reward / greatest(ifnull(cum_split_rate,1),ifnull(last_split_rate,1)) as stock_reward --直近の株式分割率を反映させた調整後配当
+        * except(stock_reward,stock_amount),
+        stock_reward / greatest(ifnull(cum_split_rate,1),ifnull(last_split_rate,1)) as stock_reward, --直近の株式分割率を反映させた調整後配当
+        close * adjust_split_rate as before_adjust_close, --調整前株価の再現、時価総額に使用
+        final_stock_mount_adjust_split_rate * stock_amount as stock_amount --分割実施~分割を織り込んだ決算短信が発表されるまで株式数を分割後にしたもの
     from
         base_aggre 
 ),
@@ -538,7 +594,8 @@ trend_add as(--移動平均のクロスを判別するフラグや各指標の�
         end as price_movement,
         date_diff(created_at,running_release_date,day) as release_past_day,
         (close - before_close) / before_close as daily_volatility, --分母は以前はcloseだった
-        lag(stock_reward,1) over(partition by stock_code order by created_at) as before_stock_reward 
+        lag(stock_reward,1) over(partition by stock_code order by created_at) as before_stock_reward,
+        before_adjust_close * stock_amount as market_cap,--時価総額 
     from 
         cum_split_rate_refine
 ),
@@ -697,7 +754,48 @@ point_add as(
         lose_flg,
         stock_reward / nullif(close,0) as reward_rate, --調整後利回り
         stock_reward,--調整後配当
-       (net_income - before_net_income) / nullif(abs(before_net_income),0) as quarter_net_income_rate,--純利益(前年同期比)
+        --前quarter比の経営指標
+        case
+            when quarter_earnings_rate < -3 then -3
+            when quarter_earnings_rate >= 3 then 3
+            else quarter_earnings_rate
+        end as quarter_earnings_rate,
+        case
+            when quarter_operating_income_rate < -3 then -3
+            when quarter_operating_income_rate >= 3 then 3
+            else quarter_operating_income_rate
+        end as quarter_operating_income_rate,
+        case
+            when quarter_ordinaly_profit_rate < -3 then -3
+            when quarter_ordinaly_profit_rate >= 3 then 3
+            else quarter_ordinaly_profit_rate
+        end as quarter_ordinaly_profit_rate,
+        case
+            when quarter_net_income_rate < -3 then -3
+            when quarter_net_income_rate >= 3 then 3
+            else quarter_net_income_rate
+        end as quarter_net_income_rate,        
+        --前年同期比の経営指標
+        case
+            when earnings_rate < -3 then -3
+            when earnings_rate >= 3 then 3
+            else earnings_rate
+        end as earnings_rate,
+        case
+            when operating_income_rate < -3 then -3
+            when operating_income_rate >= 3 then 3
+            else operating_income_rate
+        end as operating_income_rate,
+        case
+            when ordinaly_profit_rate < -3 then -3
+            when ordinaly_profit_rate >= 3 then 3
+            else ordinaly_profit_rate
+        end as ordinaly_profit_rate,
+        case
+            when net_income_rate < -3 then -3
+            when net_income_rate >= 3 then 3
+            else net_income_rate
+        end as net_income_rate,  
         per, --株価収益率,株価 ÷ 1株あたり純利益（EPS）,高いほど割高
         pbr,--株価純資産倍率株価 ÷ 1株あたり純資産（BPS）,低いと稼げていない会社,高いと割高
         roe,--自己資本利益率
@@ -706,11 +804,7 @@ point_add as(
         moving_avg2, --2025-12-02追加
         rsi,--14日間のRSI
         stocasticks,--7日間のストキャスティクス
-        --k_value,--モデル学習時のみ参照 2025-12-02追加
-        --d_value,--モデル学習時のみ参照 2025-12-02追加
         stocasticks2,--14日間のストキャスティクス 2025-12-02追加
-        --k_value2,--モデル学習時のみ参照 2025-12-02追加
-        --d_value2,--モデル学習時のみ参照 2025-12-02追加
         volume_ratio,
         psychological,
         roc,
@@ -743,14 +837,6 @@ point_add as(
         close / before_day5_close as day5_crease_rate,--前週比
         close / before_day20_close as day20_crease_rate,--前月比
         close / before_day60_close as day60_crease_rate,--三か月前比
-        case--元々report_release_past_day<=90で　elseを1としていたがirregular_flgつけたので削除した
-            when net_income_gain_rate is null then 2
-            when net_income_gain_rate < -5 then 3 -- -500%未満
-            when net_income_gain_rate < -1 then 4 -- -100%未満
-            when net_income_gain_rate < -0.2 then 5 -- -20%未満
-            when net_income_gain_rate < 2 then 6 -- 200%未満
-            when net_income_gain_rate >= 2 then 7 --200%未満
-        end as net_income_gain_flg,
         case 
             when increase_num <= -3 then -3
             when increase_num >= 3 then 3
@@ -766,9 +852,6 @@ point_add as(
             when year3_red_count between 6 and 11 then 2
             when year3_red_count >= 12 then 3
         end as year3_red_count,--直近3年間の赤字クオーター数　※累積の純利益から算出,四半期ごとに赤字か否かではない
-        --earnings_num,--連続売上維持期数
-        --operating_income_num,--連続営業利益率維持期数
-        --equity_ratio, --自己資本比率
         case 
             when equity_ratio >=0.5 then 2
             when equity_ratio >= 0.3 then 1
@@ -828,36 +911,6 @@ point_add as(
             when avg_volume_1y < 100000 then 5
             when avg_volume_1y >= 100000 then 6
         end as volume_tier,
-        case
-            when up_past_day < 5 then 1
-            when up_past_day < 10 then 2
-            when up_past_day < 20 then 3
-            when up_past_day < 40 then 4
-            when up_past_day < 60 then 5
-            when up_past_day < 80 then 6
-            when up_past_day < 100 then 7
-            when up_past_day >= 100 then 8
-        end as up_past_day_tier,
-        case
-            when down_past_day < 5 then 1
-            when down_past_day < 10 then 2
-            when down_past_day < 20 then 3
-            when down_past_day < 40 then 4
-            when down_past_day < 60 then 5
-            when down_past_day < 80 then 6
-            when down_past_day < 100 then 7
-            when down_past_day >= 100 then 8
-            else 1
-        end as down_past_day_tier,    
-        --より数値的にする場合
-        case
-            when up_past_day < 5 then 5
-            when up_past_day >= 90 then 90
-        end as cap_up_past_day,
-        case
-            when down_past_day < 5 then 5
-            when down_past_day >= 90 then 90
-        end as cap_down_past_day,         
     from 
         sign_add3 as t1
     left join
@@ -897,8 +950,6 @@ market_daily as(
         avg(d_value) as d_value,        
         avg(std_volatility) as market_volatility,
         avg(std_volatility2) as market_volatility2,  
-        1 - (count(case when up_flg = 1 then stock_code end) / count(stock_code)) as daily_up_weight,  --市況の重み
-        1 - (count(case when down_flg = 1 then stock_code end) / count(stock_code)) as daily_down_weight,
     from
         market_base
     group by 1
@@ -971,10 +1022,6 @@ mcs as(
 ),
 total_avg as(--学習期間のみで平均をとる
     select
-        avg(cap_up_past_day) as avg_cap_up_past_day,
-        avg(cap_down_past_day) as avg_cap_down_past_day,
-        avg(up_past_day_tier) as avg_up_past_day_tier,
-        avg(down_past_day_tier) as avg_down_past_day_tier,        
         count(case when up_flg = 1 then stock_code end) as up_cnt,
         count(case when down_flg = 1 then stock_code end) as down_cnt,
         count(stock_code) as total_ids
@@ -984,7 +1031,7 @@ total_avg as(--学習期間のみで平均をとる
         created_at between '2016-06-01' and '2024-11-30'
 )
 select
-    t1.* except(weather_point,cap_up_past_day,cap_down_past_day,up_past_day_tier,down_past_day_tier),
+    t1.* except(weather_point),
     case 
         when weather_point <= 1 then 1 --'thunder'
         when weather_point <= 5 then 2 --'rain'
@@ -1007,59 +1054,7 @@ select
     case when t3.market_cap_section = 'large' then  mcs_bottom_relative_rate end as mcs_large_bottom_relative_rate,
     case when t3.market_cap_section = 'small' then  mcs_top_relative_rate end as mcs_small_top_relative_rate,
     case when t3.market_cap_section = 'mid' then  mcs_top_relative_rate end as mcs_mid_top_relative_rate,
-    case when t3.market_cap_section = 'large' then  mcs_top_relative_rate end as mcs_large_top_relative_rate,
-    --市況weight
-    daily_up_weight,
-    daily_down_weight,
-    --所要日数weight
-    avg_up_past_day_tier / t1.up_past_day_tier as up_tier_rate,
-    avg_down_past_day_tier / t1.down_past_day_tier as down_tier_rate,
-    --日数weight×市況
-    case
-        when t1.up_past_day_tier is null then  daily_up_weight  
-        else (avg_up_past_day_tier / t1.up_past_day_tier) * daily_up_weight
-    end as up_weight,  
-    case
-        when t1.down_past_day_tier is null then daily_down_weight
-        else (avg_down_past_day_tier / t1.down_past_day_tier) * daily_down_weight
-    end as down_weight,   
-    --日数weight二乗×市況二乗    
-    case
-        when t1.up_past_day_tier is null then  power(daily_up_weight,2) 
-        else power((avg_up_past_day_tier / t1.up_past_day_tier),2) * power(daily_up_weight,2) --二乗×二乗はweighted_pr_aucが0.98から始まってしまうのでtierでやってみる
-    end as up_weight2,
-    case
-        when t1.down_past_day_tier is null then  power(daily_down_weight,2) 
-        else power((avg_down_past_day_tier / t1.down_past_day_tier),2) * power(daily_down_weight,2) --二乗×二乗はweighted_pr_aucが0.98から始まってしまうのでtierでやってみる
-    end as down_weight2,
-    --日数weight二乗×市況二乗 に上がらなかったときの補正値 0.5 + 上がった行数/全行数:0.56,上がる割合が6％多いから上がらなかった行は6%分重みを増やす    
-    case
-        when t1.up_past_day_tier is null then  power(daily_up_weight,2) * (0.5 + (up_cnt / total_ids))
-        else power((avg_up_past_day_tier / t1.up_past_day_tier),2) * power(daily_up_weight,2) --二乗×二乗はweighted_pr_aucが0.98から始まってしまうのでtierでやってみる
-    end as up_weight3,
-    case
-        when t1.down_past_day_tier is null then  power(daily_up_weight,2) * (0.5 + (down_cnt / total_ids))
-        else power((avg_down_past_day_tier / t1.down_past_day_tier),2) * power(daily_down_weight,2) --二乗×二乗はweighted_pr_aucが0.98から始まってしまうのでtierでやってみる
-    end as down_weight3,
-    --日数weight二乗×市況二乗 に上がらなかったときの補正値 上がった行数/全行数:0.56,本来はイーブン0.5、だから0.56/0.5分重みを増やす  
-    case
-        when t1.up_past_day_tier is null then  power(daily_up_weight,2) * ((up_cnt / total_ids)/0.5)
-        else power((avg_up_past_day_tier / t1.up_past_day_tier),2) * power(daily_up_weight,2) --二乗×二乗はweighted_pr_aucが0.98から始まってしまうのでtierでやってみる
-    end as up_weight4,
-    case
-        when t1.down_past_day_tier is null then  power(daily_down_weight,2) * ((down_cnt / total_ids)/0.5)
-        else power((avg_down_past_day_tier / t1.down_past_day_tier),2) * power(daily_down_weight,2) --二乗×二乗はweighted_pr_aucが0.98から始まってしまうのでtierでやってみる
-    end as down_weight4,
-    --+
-    
-    case
-        when t1.up_past_day_tier is null then  power(daily_up_weight,2) * (up_cnt / (total_ids - up_cnt))
-        else power((avg_up_past_day_tier / t1.up_past_day_tier),2) * power(daily_up_weight,2) --二乗×二乗はweighted_pr_aucが0.98から始まってしまうのでtierでやってみる
-    end as up_weight5,
-    case
-        when t1.down_past_day_tier is null then  power(daily_down_weight,2) * (down_cnt / (total_ids - down_cnt))
-        else power((avg_down_past_day_tier / t1.down_past_day_tier),2) * power(daily_down_weight,2) --二乗×二乗はweighted_pr_aucが0.98から始まってしまうのでtierでやってみる
-    end as down_weight5
+    case when t3.market_cap_section = 'large' then  mcs_top_relative_rate end as mcs_large_top_relative_rate
 from
     point_sum as t1
 left join
