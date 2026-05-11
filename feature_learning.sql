@@ -55,17 +55,27 @@ suggest_add as(
                 when weather in(4,5)         then '優良企業'  
                 else '確率のみ'              
             end            
+            when pbr >= 0 and forcast_up_rate >= 0.7 and forcast_down_rate < 0.1 and supervision_reason is null and irregular_flg is null then
+            case
+                when reward_rate >= 0.04     then '高配当'                
+                when weather in(4,5)         then '優良企業'  
+            end    
         end as suggest_type,
         case
             when pbr >= 0 and forcast_up_rate >= 0.9 and forcast_down_rate < 0.1 and supervision_reason is null and irregular_flg is null then
             case
                 when stock_split in(2,3) then 1
                 when buyback_flg = 1         then 2
-                when reward_rate >= 0.04     then 3                
-                when weather in(4,5)         then 4  
-                else 5              
-            end
-        end as suggest_sort
+                when reward_rate >= 0.04     then 3            
+                when weather in(4,5)         then 4
+                else 5          
+            end            
+            when pbr >= 0 and forcast_up_rate >= 0.7 and forcast_down_rate < 0.1 and supervision_reason is null and irregular_flg is null then
+            case
+                when reward_rate >= 0.04     then 3               
+                when weather in(4,5)         then 4
+            end    
+        end as suggest_sort, 
     from
         joint_tb
 ),
