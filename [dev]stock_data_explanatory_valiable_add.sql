@@ -118,7 +118,7 @@ cluster by stock_code as(
             base as t1
         left join
             base as t2
-            on t1.stock_code = t2.stock_code and t1.created_at between date_add(t2.created_at,interval -120 day) and date_add(t2.created_at,interval -1 day)
+            on t1.stock_code = t2.stock_code and t1.created_at between date_add(t2.created_at,interval -30 day) and date_add(t2.created_at,interval -1 day)
         group by 1,2
     ),
     down_tb as(
@@ -130,7 +130,7 @@ cluster by stock_code as(
             base as t1
         left join
             base as t2
-            on t1.stock_code = t2.stock_code and t1.created_at between date_add(t2.created_at,interval -120 day) and date_add(t2.created_at,interval -1 day)
+            on t1.stock_code = t2.stock_code and t1.created_at between date_add(t2.created_at,interval -30 day) and date_add(t2.created_at,interval -1 day)
         group by 1,2
     ),
     pre_flg as(
@@ -397,7 +397,7 @@ from
 ;
 ##################################################################################################################################################################################################################
 ##################################################################################################################################################################################################################
-create or replace table feature_learning_dev.stock_data_explanatory_valiable_add_20260428
+create or replace table feature_learning_dev.stock_data_explanatory_valiable_add_20260428_day30
 partition by created_at 
 cluster by stock_code as(
 with
@@ -1019,16 +1019,6 @@ mcs as(
         topix / max(topix) over(partition by market_cap_section order by created_at rows between 20 preceding and current row) as mcs_top_relative_rate,
     from
         topix_add
-),
-total_avg as(--学習期間のみで平均をとる
-    select
-        count(case when up_flg = 1 then stock_code end) as up_cnt,
-        count(case when down_flg = 1 then stock_code end) as down_cnt,
-        count(stock_code) as total_ids
-    from
-        point_add
-    where
-        created_at between '2016-06-01' and '2024-11-30'
 )
 select
     t1.* except(weather_point),
@@ -1063,7 +1053,5 @@ left join
 left join
     mcs as t3
     on t1.created_at = t3.created_at and t1.market_cap_section = t3.market_cap_section
-cross join
-    total_avg
 );
 
