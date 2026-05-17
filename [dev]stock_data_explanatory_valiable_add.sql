@@ -118,7 +118,7 @@ cluster by stock_code as(
             base as t1
         left join
             base as t2
-            on t1.stock_code = t2.stock_code and t1.created_at between date_add(t2.created_at,interval -30 day) and date_add(t2.created_at,interval -1 day)
+            on t1.stock_code = t2.stock_code and t1.created_at between date_add(t2.created_at,interval -120 day) and date_add(t2.created_at,interval -1 day)
         group by 1,2
     ),
     down_tb as(
@@ -130,7 +130,7 @@ cluster by stock_code as(
             base as t1
         left join
             base as t2
-            on t1.stock_code = t2.stock_code and t1.created_at between date_add(t2.created_at,interval -30 day) and date_add(t2.created_at,interval -1 day)
+            on t1.stock_code = t2.stock_code and t1.created_at between date_add(t2.created_at,interval -120 day) and date_add(t2.created_at,interval -1 day)
         group by 1,2
     ),
     pre_flg as(
@@ -397,7 +397,7 @@ from
 ;
 ##################################################################################################################################################################################################################
 ##################################################################################################################################################################################################################
-create or replace table feature_learning_dev.stock_data_explanatory_valiable_add_20260428_day30
+create or replace table feature_learning_dev.stock_data_explanatory_valiable_add_20260513
 partition by created_at 
 cluster by stock_code as(
 with
