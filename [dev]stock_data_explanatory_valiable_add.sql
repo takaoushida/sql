@@ -57,96 +57,97 @@ for tables in(
         );
 end for;
 
-create or replace table temp_folder.dev_stock_data_flg_add 
+create or replace table feature_learning_dev.stock_data_explanatory_valiable_add_20260528
 partition by created_at 
 cluster by stock_code as(
-    with
-    delisting_tb as(
-        select
-            * except(date),
-            cast(date as date) as created_at,
-        from
-            stock_data.delisting_tables
-    ),
-    delisting_stock_code as(
-        select
-            distinct
-            stock_code
-        from
-            delisting_tb
-    ),
-    delisting_mst as(
-        select
-            stock_code
-        from
-            `stock_data_mst.delisting_20*`
-        where
-            end_date <= current_date('Asia/Tokyo')
-    ),
-    tokyo_01 as(
-        select
-            t1.* except(date),
-            cast(date as date) as created_at,
-        from
-            stock_data.tokyo_01 as t1
-        left join
-            delisting_mst as t2
-            on t1.stock_code = t2.stock_code
-        left join
-            delisting_stock_code as t3
-            on t1.stock_code = t3.stock_code
-        where
-            t2.stock_code is null and t3.stock_code is null
-    ),
-    all_stock_data as(
-        select * from tokyo_01 union all
-        select * from delisting_tb
-    ),
-    base as(
-        select
-            * ,
-            lead(open,1) over(partition by stock_code order by created_at) as contract_price,--翌日の始値が約定価格
-        from
-            all_stock_data 
-    ),
-    up_tb as(
-        select
-            t1.created_at,
-            t1.stock_code,
-            min(case when t2.high / t1.contract_price >= 1.1 then t2.created_at end) as up_date,
-        from
-            base as t1
-        left join
-            base as t2
-            on t1.stock_code = t2.stock_code and t1.created_at between date_add(t2.created_at,interval -120 day) and date_add(t2.created_at,interval -1 day)
-        group by 1,2
-    ),
-    down_tb as(
-        select
-            t1.created_at,
-            t1.stock_code,
-            min(case when t2.low / t1.contract_price <= 0.9 then t2.created_at end) as down_date,
-        from
-            base as t1
-        left join
-            base as t2
-            on t1.stock_code = t2.stock_code and t1.created_at between date_add(t2.created_at,interval -120 day) and date_add(t2.created_at,interval -1 day)
-        group by 1,2
-    ),
-    pre_flg as(
-        select
-            t1.*,
-            up_date,
-            down_date,
-        from
-            base as t1
-        left join
-            up_tb as t2
-            on t1.stock_code = t2.stock_code and t1.created_at = t2.created_at
-        left join
-            down_tb as t3
-            on t1.stock_code = t3.stock_code and t1.created_at = t3.created_at
-    )
+with
+delisting_tb as(
+    select
+        * except(date),
+        cast(date as date) as created_at,
+    from
+        stock_data.delisting_tables
+),
+delisting_stock_code as(
+    select
+        distinct
+        stock_code
+    from
+        delisting_tb
+),
+delisting_mst as(
+    select
+        stock_code
+    from
+        `stock_data_mst.delisting_20*`
+    where
+        end_date <= current_date('Asia/Tokyo')
+),
+tokyo_01 as(
+    select
+        t1.* except(date),
+        cast(date as date) as created_at,
+    from
+        stock_data.tokyo_01 as t1
+    left join
+        delisting_mst as t2
+        on t1.stock_code = t2.stock_code
+    left join
+        delisting_stock_code as t3
+        on t1.stock_code = t3.stock_code
+    where
+        t2.stock_code is null and t3.stock_code is null
+),
+all_stock_data as(
+    select * from tokyo_01 union all
+    select * from delisting_tb
+),
+base as(
+    select
+        * ,
+        lead(open,1) over(partition by stock_code order by created_at) as contract_price,--翌日の始値が約定価格
+    from
+        all_stock_data 
+),
+up_tb as(
+    select
+        t1.created_at,
+        t1.stock_code,
+        min(case when t2.high / t1.contract_price >= 1.1 then t2.created_at end) as up_date,
+    from
+        base as t1
+    left join
+        base as t2
+        on t1.stock_code = t2.stock_code and t1.created_at between date_add(t2.created_at,interval -120 day) and date_add(t2.created_at,interval -1 day)
+    group by 1,2
+),
+down_tb as(
+    select
+        t1.created_at,
+        t1.stock_code,
+        min(case when t2.low / t1.contract_price <= 0.9 then t2.created_at end) as down_date,
+    from
+        base as t1
+    left join
+        base as t2
+        on t1.stock_code = t2.stock_code and t1.created_at between date_add(t2.created_at,interval -120 day) and date_add(t2.created_at,interval -1 day)
+    group by 1,2
+),
+pre_flg as(
+    select
+        t1.*,
+        up_date,
+        down_date,
+    from
+        base as t1
+    left join
+        up_tb as t2
+        on t1.stock_code = t2.stock_code and t1.created_at = t2.created_at
+    left join
+        down_tb as t3
+        on t1.stock_code = t3.stock_code and t1.created_at = t3.created_at
+),
+flg_add as(
     select
         * except(up_date,down_date),
         case when up_date is not null then 1 end as up_flg,--モデル学習用のフラグ
@@ -157,11 +158,7 @@ cluster by stock_code as(
         case when down_date < ifnull(up_date,current_date('Asia/Tokyo')) then 1 end as lose_flg, --2026-03-11修正
     from
         pre_flg
-);
-##################################################################################################################################################################################################################
-##################################################################################################################################################################################################################
-create or replace table temp_folder.dev_quartely_report_with_increase_num as
-with
+),
 quartely_report as(
     select
         t1.* except(earnings_title,operating_income_title,ordinaly_profit_title,net_income_title,period_month,omit_flg,xbrl_less_known_flg,stock_reward),
@@ -377,7 +374,8 @@ quarter_lag_add as(
         lag(quarter_net_income) over(partition by stock_code order by period,quarter) as last_quarter_net_income,
     from
         quartely_report_join_tb
-)
+),
+increase_num_add as(
 select
     * except(quarter_earnings,quarter_operating_income,quarter_ordinaly_profit,
              before_earnings,before_operating_income,before_ordinaly_profit,   last_quarter_earnings,last_quarter_operating_income,last_quarter_ordinaly_profit,last_quarter_net_income
@@ -394,13 +392,7 @@ select
     (net_income - before_net_income) / nullif(abs(before_net_income),0) as net_income_rate,--純利益(前年同期比)
 from
     quarter_lag_add
-;
-##################################################################################################################################################################################################################
-##################################################################################################################################################################################################################
-create or replace table feature_learning_dev.stock_data_explanatory_valiable_add_20260513
-partition by created_at 
-cluster by stock_code as(
-with
+),
 pre_supervision as(--管理銘柄のテーブル
     select
         * except(url,excluded,name),
@@ -424,7 +416,7 @@ buyback_join as(--期間がかぶることがある
             when date_diff(t1.created_at,t2.start_date,day) between -20 and 0 then 1
         end as buyback_flg
     from
-        temp_folder.dev_stock_data_flg_add  as t1
+        flg_add  as t1
     left join
         `stock_data.buyback_*` as t2
         on t1.stock_code = t2.stock_code and t1.created_at between t2.release_date and t2.end_date
@@ -443,7 +435,7 @@ date_tb as(
         distinct
         created_at
     from
-        temp_folder.dev_stock_data_flg_add
+        flg_add
 ),
 pre_split_tb as(--split_dateが土曜日であることがあるのでsplit_date以降で結合
     select
@@ -479,9 +471,9 @@ split_add as(
         row_number() over(partition by t1.stock_code,t6.split_date order by t1.stock_code) as split_row_num,
         t6.split_date as real_split_date
     from
-        temp_folder.dev_stock_data_flg_add as t1
+        flg_add as t1
     left join
-        temp_folder.dev_quartely_report_with_increase_num as t2
+        increase_num_add as t2
         on t1.stock_code = t2.stock_code and t1.created_at between t2.join_start_date and t2.join_end_date 
     left join
         split_tb as t3
