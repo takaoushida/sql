@@ -455,6 +455,11 @@ pre_split_tb as(--split_dateが土曜日であることがあるのでsplit_date
     inner join
         date_tb as t2
         on t1.split_date <= t2.created_at
+    left join   
+        `valid-responder-219005.spreadsheet_link.stock_split_rename_sheet` as t3
+        on t1.stock_code = t3.stock_code and t1.release_date = t3.release_date and t1.pdf_url = t3.pdf_url
+    where   
+        t3.omit_flg is null
 ),
 split_tb as(--split_date以降の最初の日=翌営業日のみにする
     select
