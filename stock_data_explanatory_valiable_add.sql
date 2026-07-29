@@ -449,7 +449,7 @@ pre_split_tb as(--split_dateが土曜日であることがあるのでsplit_date
     select
         t1.* except(split_date),
         t2.created_at,
-        row_number() over(partition by stock_code,split_date order by created_at) as split_row_num
+        row_number() over(partition by t1.stock_code,t1.split_date order by t2.created_at) as split_row_num
     from
         `stock_data.stock_split_*` as t1
     inner join
