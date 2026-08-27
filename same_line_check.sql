@@ -57,7 +57,7 @@ space_cut as(--漢字の数値を置換
     where
         xbrl is not null --xbrlが存在する行は確実に決算短信
         or (
-            not regexp_contains(title,r'訂正|変更|再登録|追加|超えること|差替|キャッシュ・フロー計算書|DATABOOK|Q&A|PDF|について|お知らせ|サマリー|高い関心|データ集|推移表|~|FAQ|記者会見|報告会|取り組み')--xbrlがなく、これらのキーワードを含んでいないなら決算短信
+            not regexp_contains(title,r'資料|訂正|変更|再登録|追加|超えること|差替|キャッシュ・フロー計算書|DATABOOK|Q&A|PDF|について|お知らせ|サマリー|高い関心|データ集|推移表|~|FAQ|記者会見|報告会|取り組み|説明|書き起こし|決算説明会')--xbrlがなく、これらのキーワードを含んでいないなら決算短信
             and title not like '%報告' and title not like '%報告書' --報告で終わるタイトルは決算短信ではない
             and title not like '%決算' --決算で終わるタイトルは決算短信ではない ※[日本基準]などついているはず
         ) 
