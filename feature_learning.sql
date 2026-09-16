@@ -15,6 +15,8 @@ stock_data as(
         per,
         stock_reward,
         reward_rate,
+        UP_flg,
+        down_flg,
         win_flg,
         lose_flg,
         weather,
