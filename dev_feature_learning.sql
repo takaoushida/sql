@@ -43,12 +43,13 @@ subgroup_up as(
         `feature_learning_dev.final_all_group_forecast_*`
     where
         created_at >= '2025-04-01'
-)
+),
 joint_tb as(
     select
         t1.*,
         t2.forcast_up_rate,
         t3.forcast_down_rate,
+        t4.subgroup_up_rate
         row_number() over(partition by t1.stock_code order by t1.created_at) as row_number
     from
         stock_data  as t1
@@ -58,6 +59,9 @@ joint_tb as(
     left join
         `temp_folder.feature_learning_down_*` as t3
         on t1.stock_code = t3.stock_code and t1.created_at = t3.created_at
+    left join  
+        subgroup_up as t4
+        on t1.stock_code = t4.stock_code and t1.created_at = t4.created_at
 ),
 suggest_add as(
     select
