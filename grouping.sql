@@ -1,4 +1,4 @@
-create or replace table feature_learning_dev.grouping
+create or replace table feature_learning_prd.grouping_{target_date_suffix}
 partition by created_at as(
     with
     tables as(
@@ -8,6 +8,8 @@ partition by created_at as(
             coalesce(mcs_small_top_relative_rate,mcs_mid_top_relative_rate,mcs_large_top_relative_rate) as mcs_top_relative_rate
         from
             looker_datamart.stock_data_explanatory_valiable_add
+        where
+            created_at = '{target_date_str}'
     )
     select
         t1.created_at,
