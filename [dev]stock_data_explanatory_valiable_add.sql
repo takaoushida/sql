@@ -1010,41 +1010,10 @@ topix_add as(
 mcs as(
     select
         *,
-        round(topix / min(topix) over(partition by market_cap_section order by created_at rows between 20 preceding and current row),4) as mcs_bottom_relative_rate,
-        round(topix / max(topix) over(partition by market_cap_section order by created_at rows between 20 preceding and current row),4) as mcs_top_relative_rate,
-        lag(topix,1) over(partition by market_cap_section order by created_at) as before_topix,
-        lag(topix,6) over(partition by market_cap_section order by created_at) as before_day7_topix,
-        avg(topix) over(partition by market_cap_section order by created_at rows between 20 preceding and current row) as topix_avg2,
+        topix / min(topix) over(partition by market_cap_section order by created_at rows between 20 preceding and current row) as mcs_bottom_relative_rate,
+        topix / max(topix) over(partition by market_cap_section order by created_at rows between 20 preceding and current row) as mcs_top_relative_rate,
     from
         topix_add
-),
-mcs2 as(
-    select
-        *,
-        case when topix > before_topix then topix - before_topix else 0 end as topix_gain,
-        case when topix < before_topix then before_topix - topix else 0 end as topix_loss,
-    from
-        mcs
-),
-mcs3 as(
-    select
-        *,
-        avg(topix_gain) over (partition by market_cap_section order by created_at rows between 13 preceding and current row) as avg_topix_gain,
-        avg(topix_loss) over (partition by market_cap_section order by created_at rows between 13 preceding and current row) as avg_topix_loss,
-    from
-        mcs2
-),
-mcs4 as(
-    select
-        *,
-        case
-            when avg_topix_loss = 0 then 1
-            else 1 - (1 / (1 + (avg_topix_gain / avg_topix_loss)))
-        end as mcs_rsi,
-        ((topix - ifnull(before_day7_topix,0)) / nullif(before_day7_topix,0)) * 100 as mcs_roc,
-        topix / nullif(topix_avg2,0) as mcs_envelope,
-    from
-        mcs3
 ),
 pre_final as(
     select
@@ -1066,9 +1035,6 @@ pre_final as(
         t2.market_volatility2, 
         t3.mcs_moving_avg, 
         t3.mcs_stocasticks,
-        t3.mcs_rsi,
-        t3.mcs_roc,
-        t3.mcs_envelope,
         case when t3.market_cap_section = 'small' then  mcs_bottom_relative_rate end as mcs_small_bottom_relative_rate,
         case when t3.market_cap_section = 'mid' then  mcs_bottom_relative_rate end as mcs_mid_bottom_relative_rate,
         case when t3.market_cap_section = 'large' then  mcs_bottom_relative_rate end as mcs_large_bottom_relative_rate,
@@ -1082,7 +1048,7 @@ pre_final as(
         market as t2
         on t1.created_at = t2.created_at
     left join
-        mcs4 as t3
+        mcs as t3
         on t1.created_at = t3.created_at and t1.market_cap_section = t3.market_cap_section
 )
 select  
