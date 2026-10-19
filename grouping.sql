@@ -12,8 +12,8 @@ tables as(
         created_at = '{target_date_str}'
 )
 select
-    t1.created_at,
-    t1.stock_code,
+    created_at,
+    stock_code,
     moving_avg,
     stocasticks,
     case
@@ -379,57 +379,28 @@ select
         when net_income_rate >= 1 then 10
         else 11
     end as net_income_rate,  --net_income_gain_flgは削除
-    t1.market_cap_section,
-    cast(ifnull(t1.ipo_flg,0) as string) as ipo_flg,
-    ifnull(t1.supervision_reason,'null') as supervision_reason,
-    cast(ifnull(t1.increase_num,0) as string) as increase_num,
-    cast(ifnull(t1.irregular_flg,0) as string) as irregular_flg,
-    cast(ifnull(t1.change_flg,0) as string) as change_flg,
-    cast(t1.year3_red_count as string) as year3_red_count,
-    cast(ifnull(t1.stock_reward_increase_flg,0) as string) as stock_reward_increase_flg,
-    t1.weather,
-    cast(ifnull(t1.increase_past_day_tier,0) as string) as increase_past_day_tier,
-    cast(ifnull(t1.decrease_past_day_tier,0) as string) as decrease_past_day_tier,
-    t1.up_flg,
-    t1.down_flg,
-    t1.win_flg,
-    t1.lose_flg,   
-    cast(t1.volume_tier as string) as volume_tier,
-    cast(ifnull(t1.buyback_flg,0) as string) as buyback_flg,
-    cast(ifnull(t1.stock_split,0) as string) as stock_split,
-    cast(ifnull(t1.quarter,99) as string) as quarter,
-    cast(ifnull(t1.month,99) as string) as month,
-    cast(ifnull(t1.q4_month_diff,99) as string) as q4_month_diff,
-    case 
-        when t2.forcast_up_rate < 0.1 then '1'
-        when t2.forcast_up_rate < 0.2 then '2'
-        when t2.forcast_up_rate < 0.3 then '3'
-        when t2.forcast_up_rate < 0.4 then '4'
-        when t2.forcast_up_rate < 0.5 then '5'
-        when t2.forcast_up_rate < 0.6 then '6'
-        when t2.forcast_up_rate < 0.7 then '7'
-        when t2.forcast_up_rate < 0.8 then '8'
-        when t2.forcast_up_rate < 0.9 then '9'
-        when t2.forcast_up_rate >= 0.9 then '10'
-    end as forcast_up_rate,
-    case 
-        when t3.forcast_down_rate < 0.1 then '1'
-        when t3.forcast_down_rate < 0.2 then '2'
-        when t3.forcast_down_rate < 0.3 then '3'
-        when t3.forcast_down_rate < 0.4 then '4'
-        when t3.forcast_down_rate < 0.5 then '5'
-        when t3.forcast_down_rate < 0.6 then '6'
-        when t3.forcast_down_rate < 0.7 then '7'
-        when t3.forcast_down_rate < 0.8 then '8'
-        when t3.forcast_down_rate < 0.9 then '9'
-        when t3.forcast_down_rate >= 0.9 then '10'
-    end as forcast_down_rate,
-    cast(ifnull(t1.type1,0) as string) as type1,
+    market_cap_section,
+    cast(ifnull(ipo_flg,0) as string) as ipo_flg,
+    ifnull(supervision_reason,'null') as supervision_reason,
+    cast(ifnull(increase_num,0) as string) as increase_num,
+    cast(ifnull(irregular_flg,0) as string) as irregular_flg,
+    cast(ifnull(change_flg,0) as string) as change_flg,
+    cast(year3_red_count as string) as year3_red_count,
+    cast(ifnull(stock_reward_increase_flg,0) as string) as stock_reward_increase_flg,
+    weather,
+    cast(ifnull(increase_past_day_tier,0) as string) as increase_past_day_tier,
+    cast(ifnull(decrease_past_day_tier,0) as string) as decrease_past_day_tier,
+    up_flg,
+    down_flg,
+    win_flg,
+    lose_flg,   
+    cast(volume_tier as string) as volume_tier,
+    cast(ifnull(buyback_flg,0) as string) as buyback_flg,
+    cast(ifnull(stock_split,0) as string) as stock_split,
+    cast(ifnull(quarter,99) as string) as quarter,
+    cast(ifnull(month,99) as string) as month,
+    cast(ifnull(q4_month_diff,99) as string) as q4_month_diff,
+    cast(ifnull(type1,0) as string) as type1,
 from
-    tables as t1
-left join
-    temp_folder.feature_learning_up as t2
-    on t1.created_at = t2.created_at and t1.stock_code = t2.stock_code
-left join
-    temp_folder.feature_learning_down as t3
-    on t1.created_at = t3.created_at and t1.stock_code = t3.stock_code
+    tables 
+

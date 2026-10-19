@@ -416,7 +416,7 @@ buyback_join as(--期間がかぶることがある
     from
         flg_add  as t1
     left join
-        `stock_data.buyback_*` as t2
+        `jpx.buyback_*` as t2
         on t1.stock_code = t2.stock_code and t1.created_at between t2.release_date and t2.end_date
 ),
 buyback_unique as(
@@ -441,7 +441,7 @@ pre_split_tb as(--split_dateが土曜日であることがあるのでsplit_date
         t2.created_at,
         row_number() over(partition by stock_code,split_date order by created_at) as split_row_num
     from
-        `stock_data.stock_split_*` as t1
+        `jpx.stock_split_*` as t1
     inner join
         date_tb as t2
         on t1.split_date <= t2.created_at
