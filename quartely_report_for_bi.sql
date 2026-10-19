@@ -32,7 +32,7 @@ exp_ln_base as(--株式分割を結合
     from
         stock_amount_lead_add as t1
     left join
-        `stock_data.stock_split_*` as t2
+        `jpx.stock_split_*` as t2
         on t1.stock_code = t2.stock_code and t2.split_date between t1.join_start_date and t1.join_end_date
 ),
 daily_change as(--決算短信公開日間の分割を公開日に合わせる処理
