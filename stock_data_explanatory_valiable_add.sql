@@ -635,10 +635,10 @@ sign_add as(--前日のフラグと異なるなら売買サイン,stcasticksも�
         end as moving_avg2,
         case when k_value >= d_value then 'upper' else 'lower' end as stocas_trend,
         case when k_value2 >= d_value2 then 'upper' else 'lower' end as stocas_trend2,
-        (upper_days / 12) * 100 as psychological,
+        (upper_days / 12) as psychological,
         case
-            when avg_loss = 0 then 100
-            else 100 - (100 / (1 + (avg_gain / avg_loss)))
+            when avg_loss = 0 then 1
+            else 1 - (1 / (1 + (avg_gain / avg_loss)))
         end as rsi,
         lag(close_rank,1) over(partition by stock_code order by created_at) as day1_close_rank,
         lag(close_rank,2) over(partition by stock_code order by created_at) as day2_close_rank,
@@ -646,7 +646,7 @@ sign_add as(--前日のフラグと異なるなら売買サイン,stcasticksも�
         lag(close_rank,4) over(partition by stock_code order by created_at) as day4_close_rank,
         lag(close_rank,5) over(partition by stock_code order by created_at) as day5_close_rank,
         lag(close_rank,6) over(partition by stock_code order by created_at) as day6_close_rank,
-        ((up_volume + (stay_volume/2)) / nullif((down_volume + (stay_volume/2)),0)) *100 as volume_ratio,
+        ((up_volume + (stay_volume/2)) / nullif((down_volume + (stay_volume/2)),0)) as volume_ratio,
         sum(stock_reward_increase_flg) over(partition by stock_code order by created_at rows between 4 preceding and current row) as stock_reward_increase_flg,
         case 
             when market_cap >= 500000000000 then 'large'
@@ -691,7 +691,7 @@ sign_add3 as(
              when stocas_trend2 = 'upper' then 2
              when stocas_trend2 = 'lower' then 3
         end as stocasticks2,
-        cast((1 - ((rci_d_value * 6) / (7*48))) * 100 as int64) as rci,  --分母はn(nの2乗-1),7日なので7*48
+        (1 - ((rci_d_value * 6) / (7*48))) as rci,  --分母はn(nの2乗-1),7日なので7*48
         close / nullif(close_avg1,0) as short_envelope, 
         close / nullif(close_avg2,0) as envelope, --20日移動平均に対する移動平均乖離率(default)
         close / nullif(close_avg3,0) as long_envelope, 
@@ -746,70 +746,70 @@ point_add as(
         down_flg,
         win_flg,
         lose_flg,
-        stock_reward / nullif(close,0) as reward_rate, --調整後利回り
+        round(stock_reward / nullif(close,0),4) as reward_rate, --調整後利回り
         stock_reward,--調整後配当
         --前quarter比の経営指標
         case
             when quarter_earnings_rate < -3 then -3
             when quarter_earnings_rate >= 3 then 3
-            else quarter_earnings_rate
-        end as quarter_earnings_rate,
+            else round(quarter_earnings_rate,4)
+        end  as quarter_earnings_rate,
         case
             when quarter_operating_income_rate < -3 then -3
             when quarter_operating_income_rate >= 3 then 3
-            else quarter_operating_income_rate
+            else round(quarter_operating_income_rate,4)
         end as quarter_operating_income_rate,
         case
             when quarter_ordinaly_profit_rate < -3 then -3
             when quarter_ordinaly_profit_rate >= 3 then 3
-            else quarter_ordinaly_profit_rate
+            else round(quarter_ordinaly_profit_rate,4)
         end as quarter_ordinaly_profit_rate,
         case
             when quarter_net_income_rate < -3 then -3
             when quarter_net_income_rate >= 3 then 3
-            else quarter_net_income_rate
+            else round(quarter_net_income_rate,4)
         end as quarter_net_income_rate,        
         --前年同期比の経営指標
         case
             when earnings_rate < -3 then -3
             when earnings_rate >= 3 then 3
-            else earnings_rate
+            else round(earnings_rate,4)
         end as earnings_rate,
         case
             when operating_income_rate < -3 then -3
             when operating_income_rate >= 3 then 3
-            else operating_income_rate
+            else round(operating_income_rate,4)
         end as operating_income_rate,
         case
             when ordinaly_profit_rate < -3 then -3
             when ordinaly_profit_rate >= 3 then 3
-            else ordinaly_profit_rate
+            else round(ordinaly_profit_rate,4)
         end as ordinaly_profit_rate,
         case
             when net_income_rate < -3 then -3
             when net_income_rate >= 3 then 3
-            else net_income_rate
+            else round(net_income_rate,4)
         end as net_income_rate,  
-        per, --株価収益率,株価 ÷ 1株あたり純利益（EPS）,高いほど割高
-        pbr,--株価純資産倍率株価 ÷ 1株あたり純資産（BPS）,低いと稼げていない会社,高いと割高
-        roe,--自己資本利益率
-        roa,--総資産利益率
+        round(per,4) as per, --株価収益率,株価 ÷ 1株あたり純利益（EPS）,高いほど割高
+        round(pbr,4) as pbr,--株価純資産倍率株価 ÷ 1株あたり純資産（BPS）,低いと稼げていない会社,高いと割高
+        round(roe,4) as roe,--自己資本利益率
+        round(roa,4) as roa,--総資産利益率
         moving_avg,--移動平均
         moving_avg2, --2025-12-02追加
-        rsi,--14日間のRSI
+        round(rsi,4) as rsi,--14日間のRSI
         stocasticks,--7日間のストキャスティクス
         stocasticks2,--14日間のストキャスティクス 2025-12-02追加
-        volume_ratio,
-        psychological,
-        roc,
-        rci,
-        short_envelope, --5日間の移動平均乖離率 2025-12-02追加
-        envelope, --20日間の移動平均乖離率
-        long_envelope, --60日間の移動平均乖離率 2025-12-02追加
-        bottom_relative_rate,--直近3年の最安値に対する元終値の割合
-        top_relative_rate,--同上の最高値
-        day60_bottom_relative_rate,
-        day60_top_relative_rate,        
+        round(volume_ratio,4) as volume_ratio,
+        round(psychological,4) as psychological,
+        round(roc,4) as roc,
+        round(rci,4) as rci,
+        round(short_envelope,4) as short_envelope, --5日間の移動平均乖離率 2025-12-02追加
+        round(envelope,4) as envelope, --20日間の移動平均乖離率
+        round(long_envelope,4) as long_envelope, --60日間の移動平均乖離率 2025-12-02追加
+        round(bottom_relative_rate,4) as bottom_relative_rate,--直近3年の最安値に対する元終値の割合
+        round(top_relative_rate,4) as top_relative_rate,--同上の最高値
+        round(day60_bottom_relative_rate,4) as day60_bottom_relative_rate,
+        round(day60_top_relative_rate,4) as day60_top_relative_rate,        
         case 
             when date_diff(t1.created_at,t2.ipo_date,year) < 0 then null --ホールディングスになるなどで再上場の場合再上場日を取得している
             when date_diff(t1.created_at,t2.ipo_date,year) <= 3 then date_diff(t1.created_at,t2.ipo_date,year)
@@ -826,11 +826,11 @@ point_add as(
             when close_avg2 < 5000 then 4
             else 5
         end as price_range,--価格帯
-        avg(abs(daily_volatility)) over(partition by t1.stock_code order by created_at  rows between 60 preceding and current row) as volatility, --3か月の値動きの荒さ
-        close / before_close as day2_crease_rate,
-        close / before_day5_close as day5_crease_rate,--前週比
-        close / before_day20_close as day20_crease_rate,--前月比
-        close / before_day60_close as day60_crease_rate,--三か月前比
+        round(avg(abs(daily_volatility)) over(partition by t1.stock_code order by created_at  rows between 60 preceding and current row),4) as volatility, --3か月の値動きの荒さ
+        round(close / before_close,4) as day2_crease_rate,
+        round(close / before_day5_close,4) as day5_crease_rate,--前週比
+        round(close / before_day20_close,4) as day20_crease_rate,--前月比
+        round(close / before_day60_close,4) as day60_crease_rate,--三か月前比
         case 
             when increase_num <= -3 then -3
             when increase_num >= 3 then 3
@@ -886,7 +886,7 @@ point_add as(
             else ifnull(increase_num,0)
         end as p8,--連続増益期数による加点(最大3)
         stock_reward_increase_flg, --増配(5日間) 2025-12-02追加
-        (quarter_net_income*1000000 * 4) / market_cap as net_income_annualized_ratio, --純利益÷時価総額
+        round((quarter_net_income*1000000 * 4) / market_cap,4) as net_income_annualized_ratio, --純利益÷時価総額
         case when (net_income - before_net_income) / nullif(abs(before_net_income),0) > 0 then past_day_tier end as increase_past_day_tier,--増益の場合の決算短信公開後経過日数
         case when (net_income - before_net_income) / nullif(abs(before_net_income),0) < 0 then past_day_tier end as decrease_past_day_tier,--減益の場合の決算短信公開後経過日数
         case 
@@ -943,8 +943,8 @@ market_daily as(
         count(case when close - before_close > 0 then stock_code end) as up_ids,
         avg(k_value) as k_value,
         avg(d_value) as d_value,        
-        avg(std_volatility) as market_volatility,
-        avg(std_volatility2) as market_volatility2,  
+        round(avg(std_volatility),4) as market_volatility,
+        round(avg(std_volatility2),4) as market_volatility2,  
     from
         market_base
     group by 1
@@ -955,10 +955,10 @@ pre_market as(
         case when k_value >= d_value then 1 end as market_stocasticks,
         avg(daily_return) over(order by created_at rows between 5 preceding and current row) as short_moving_avg, 
         avg(daily_return) over(order by created_at rows between 20 preceding and current row) as long_moving_avg,
-        sum(up_ids) over(order by created_at rows between 5 preceding and current row) / sum(ids) over(order by created_at rows between 5 preceding and current row) as market_breath,--上昇銘柄割合(5日平均)
-        sum(up_ids) over(order by created_at rows between 13 preceding and current row) / sum(ids) over(order by created_at rows between 13 preceding and current row) as market_breath2,--上昇銘柄割合(14日平均)
-        avg(daily_return) over(order by created_at rows between 5 preceding and current row) as market_return,--前日比平均(5日平均)
-        avg(daily_return) over(order by created_at rows between 13 preceding and current row) as market_return2,--前日比平均(14日平均)
+        round(sum(up_ids) over(order by created_at rows between 5 preceding and current row) / sum(ids) over(order by created_at rows between 5 preceding and current row),4) as market_breath,--上昇銘柄割合(5日平均)
+        round(sum(up_ids) over(order by created_at rows between 13 preceding and current row) / sum(ids) over(order by created_at rows between 13 preceding and current row),4) as market_breath2,--上昇銘柄割合(14日平均)
+        round(avg(daily_return) over(order by created_at rows between 5 preceding and current row),4) as market_return,--前日比平均(5日平均)
+        round(avg(daily_return) over(order by created_at rows between 13 preceding and current row),4) as market_return2,--前日比平均(14日平均)
     from
         market_daily
 ),
@@ -977,8 +977,8 @@ market_cap_section_daily as(
         avg(close / nullif(before_close,0) -1) as daily_return,
         avg(k_value) as k_value,
         avg(d_value) as d_value,
-        sum(topix_return * market_cap_rate) as topix_moving_rate --値動きの割合に加重をかけて合計する
-    from
+        sum(topix_return * market_cap_rate) as topix_moving_rate, --値動きの割合に加重をかけて合計する
+      from
         market_base
     group by 1,2
 ),
@@ -1003,7 +1003,7 @@ topix_add as(
     select
         * ,
         case when short_moving_avg >= long_moving_avg then 1 end as mcs_moving_avg,
-        100 * topix_rate as topix
+        100 * topix_rate as topix --時価総額帯別のtopix
     from
         topix_rate_add
 ),
@@ -1014,40 +1014,53 @@ mcs as(
         topix / max(topix) over(partition by market_cap_section order by created_at rows between 20 preceding and current row) as mcs_top_relative_rate,
     from
         topix_add
+),
+pre_final as(
+    select
+        t1.* except(weather_point),
+        case 
+            when weather_point <= 1 then 1 --'thunder'
+            when weather_point <= 5 then 2 --'rain'
+            when weather_point <= 10 then 3 --'cloudy'
+            when weather_point <= 16 then 4 --'partly_cloudy'
+            when weather_point >= 17 then 5 --'sun'
+        end as weather,
+        t2.market_moving_avg, 
+        t2.market_stocasticks, 
+        t2.market_breath,
+        t2.market_breath2, 
+        t2.market_return,
+        t2.market_return2, 
+        t2.market_volatility,
+        t2.market_volatility2, 
+        t3.mcs_moving_avg, 
+        t3.mcs_stocasticks,
+        case when t3.market_cap_section = 'small' then  mcs_bottom_relative_rate end as mcs_small_bottom_relative_rate,
+        case when t3.market_cap_section = 'mid' then  mcs_bottom_relative_rate end as mcs_mid_bottom_relative_rate,
+        case when t3.market_cap_section = 'large' then  mcs_bottom_relative_rate end as mcs_large_bottom_relative_rate,
+        case when t3.market_cap_section = 'small' then  mcs_top_relative_rate end as mcs_small_top_relative_rate,
+        case when t3.market_cap_section = 'mid' then  mcs_top_relative_rate end as mcs_mid_top_relative_rate,
+        case when t3.market_cap_section = 'large' then  mcs_top_relative_rate end as mcs_large_top_relative_rate,
+        extract(month from t1.created_at) as month
+    from
+        point_sum as t1
+    left join
+        market as t2
+        on t1.created_at = t2.created_at
+    left join
+        mcs as t3
+        on t1.created_at = t3.created_at and t1.market_cap_section = t3.market_cap_section
 )
-select
-    t1.* except(weather_point),
+select  
+    *,
     case 
-        when weather_point <= 1 then 1 --'thunder'
-        when weather_point <= 5 then 2 --'rain'
-        when weather_point <= 10 then 3 --'cloudy'
-        when weather_point <= 16 then 4 --'partly_cloudy'
-        when weather_point >= 17 then 5 --'sun'
-    end as weather,
-    t2.market_moving_avg, 
-    t2.market_stocasticks, 
-    t2.market_breath,
-    t2.market_breath2, 
-    t2.market_return,
-    t2.market_return2, 
-    t2.market_volatility,
-    t2.market_volatility2, 
-    t3.mcs_moving_avg, 
-    t3.mcs_stocasticks,
-    case when t3.market_cap_section = 'small' then  mcs_bottom_relative_rate end as mcs_small_bottom_relative_rate,
-    case when t3.market_cap_section = 'mid' then  mcs_bottom_relative_rate end as mcs_mid_bottom_relative_rate,
-    case when t3.market_cap_section = 'large' then  mcs_bottom_relative_rate end as mcs_large_bottom_relative_rate,
-    case when t3.market_cap_section = 'small' then  mcs_top_relative_rate end as mcs_small_top_relative_rate,
-    case when t3.market_cap_section = 'mid' then  mcs_top_relative_rate end as mcs_mid_top_relative_rate,
-    case when t3.market_cap_section = 'large' then  mcs_top_relative_rate end as mcs_large_top_relative_rate,
-    extract(month from t1.created_at) as month
-from
-    point_sum as t1
-left join
-    market as t2
-    on t1.created_at = t2.created_at
-left join
-    mcs as t3
-    on t1.created_at = t3.created_at and t1.market_cap_section = t3.market_cap_section
+        when month = 4 then 'apr'
+        when month = 9 then 'sep'
+        when market_volatility < 0.015  then 'vol_low'
+        when market_volatility < 0.018  then 'vol_mid'
+        when market_volatility >= 0.018 then 'vol_high'
+    end as subgroup
+from    
+    pre_final
 );
 
