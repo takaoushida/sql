@@ -526,6 +526,7 @@ base_aggre as(--各テクニカル指標の元となる値を集計
         avg(t1.close) over(partition by t1.stock_code order by t1.created_at rows between 5 preceding and current row) as close_avg1, --5日間平均 
         avg(t1.close) over(partition by t1.stock_code order by t1.created_at rows between 20 preceding and current row) as close_avg2, --20日間平均
         avg(t1.close) over(partition by t1.stock_code order by t1.created_at rows between 60 preceding and current row) as close_avg3, --60日間平均
+        stddev(t1.close) over(partition by t1.stock_code order by t1.created_at rows between 20 preceding and current row) as stddev2,
         lag(t1.close,1) over(partition by t1.stock_code order by t1.created_at) as before_close, --前日の値
         lag(t1.close,2) over(partition by t1.stock_code order by t1.created_at) as before_day3_close, 
         lag(t1.close,3) over(partition by t1.stock_code order by t1.created_at) as before_day4_close, 
@@ -567,6 +568,12 @@ trend_add as(--移動平均のクロスを判別するフラグや各指標の�
         case when close_avg2 >= close_avg3 then 'upper' else 'lower' end as trend2,
         case when close > before_close then close - before_close else 0 end as gain,
         case when close < before_close then before_close - close else 0 end as loss,
+        close_avg2 + stddev2 as bolinger_up1,
+        close_avg2 + (2*stddev2) as bolinger_up2,
+        close_avg2 + (3*stddev2) as bolinger_up3, 
+        close_avg2 - stddev2 as bolinger_low1,
+        close_avg2 - (2*stddev2) as bolinger_low2,
+        close_avg2 - (3*stddev2) as bolinger_low3,         
         min(close) over(partition by stock_code order by created_at rows between 60 preceding and current row) as min_60day_close,--直近N日の最安値
         max(close) over(partition by stock_code order by created_at rows between 60 preceding and current row) as max_60day_close,--直近N日の最安値
         min(close) over(partition by stock_code order by created_at rows between 750 preceding and current row) as min_3year_close,--直近N日の最安値
@@ -618,6 +625,15 @@ trend_lag_add as(--クロス発生か否かを判別するため、前日のフ�
         case
             when stock_reward / nullif(before_stock_reward,0) > 1 then 1
         end as stock_reward_increase_flg,
+        case   
+            when close >= bolinger_up3 then 3
+            when close >= bolinger_up2 then 2
+            when close >= bolinger_up1 then 1
+            when close <= bolinger_low3 then -3
+            when close <= bolinger_low2 then -2
+            when close <= bolinger_low1 then -1
+            else 0
+        end as bolinger
     from
         trend_add
 ),
@@ -905,7 +921,8 @@ point_add as(
             when avg_volume_1y < 100000 then 5
             when avg_volume_1y >= 100000 then 6
         end as volume_tier,
-        q4_month_diff
+        q4_month_diff,
+        bolinger --ボリンジャバンド 20261002追加
     from 
         sign_add3 as t1
     left join
