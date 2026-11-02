@@ -1,5 +1,5 @@
-delete from feature_learning_prd.grouping where created_at = '{target_date_str}';
-insert into feature_learning_prd.grouping
+create or replace table feature_learning_prd.grouping
+partition by created_at as(
 with
 tables as(
     select
@@ -8,8 +8,6 @@ tables as(
         coalesce(mcs_small_top_relative_rate,mcs_mid_top_relative_rate,mcs_large_top_relative_rate) as mcs_top_relative_rate
     from
         looker_datamart.stock_data_explanatory_valiable_add
-    where
-        created_at = '{target_date_str}'
 )
 select
     created_at,
@@ -401,6 +399,7 @@ select
     cast(ifnull(month,99) as string) as month,
     cast(ifnull(q4_month_diff,99) as string) as q4_month_diff,
     cast(ifnull(type1,0) as string) as type1,
+    bolinger
 from
     tables 
-
+)
