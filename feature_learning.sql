@@ -34,9 +34,7 @@ joint_tb as(
     select
         t1.*,
         t2.forcast_up_rate,
-        t2.subgroup_up_rate,
         t3.forcast_down_rate,
-        t3.subgroup_down_rate,
         row_number() over(partition by t1.stock_code order by t1.created_at) as row_number
     from
         stock_data  as t1

@@ -28,9 +28,9 @@ stock_data as(
         lightgbm_up_rate,
         lightgbm_down_rate,
     from 
-        temp_folder.pre_feature_learning_up as t1
+        temp_folder.feature_learning_up as t1
     left join
-        temp_folder.pre_feature_learning_down as t2
+        temp_folder.feature_learning_down as t2
         using(created_at,stock_code)
     where 
         created_at >= '2025-04-01'
