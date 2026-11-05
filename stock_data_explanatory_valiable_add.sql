@@ -370,6 +370,7 @@ quarter_lag_add as(
         lag(quarter_operating_income) over(partition by stock_code order by period,quarter) as last_quarter_operating_income,
         lag(quarter_ordinaly_profit) over(partition by stock_code order by period,quarter) as last_quarter_ordinaly_profit,
         lag(quarter_net_income) over(partition by stock_code order by period,quarter) as last_quarter_net_income,
+        sum(quarter_net_income) over(partition by stock_code order by period,quarter rows between 3 preceding and current row) as total_net_income --直近4Qの純利益合計
     from
         quartely_report_join_tb
 ),
@@ -847,6 +848,7 @@ point_add as(
         round(close / before_day5_close,4) as day5_crease_rate,--前週比
         round(close / before_day20_close,4) as day20_crease_rate,--前月比
         round(close / before_day60_close,4) as day60_crease_rate,--三か月前比
+        (stock_reward * stock_amount) / nullif(total_net_income,0) as payout_ratio, --配当性向,特徴量ではない
         case 
             when increase_num <= -3 then -3
             when increase_num >= 3 then 3

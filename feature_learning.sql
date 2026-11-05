@@ -13,6 +13,7 @@ stock_data as(
         roe,
         pbr,
         per,
+        payout_ratio,
         stock_reward,
         reward_rate,
         UP_flg,
