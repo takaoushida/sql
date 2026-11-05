@@ -370,7 +370,7 @@ quarter_lag_add as(
         lag(quarter_operating_income) over(partition by stock_code order by period,quarter) as last_quarter_operating_income,
         lag(quarter_ordinaly_profit) over(partition by stock_code order by period,quarter) as last_quarter_ordinaly_profit,
         lag(quarter_net_income) over(partition by stock_code order by period,quarter) as last_quarter_net_income,
-        sum(quarter_net_income) over(partition by stock_code order by period,quarter rows between 3 preceding and current row) as total_net_income --直近4Qの純利益合計
+        sum(quarter_net_income) over(partition by stock_code order by period,quarter rows between 3 preceding and current row) * 1000000 as total_net_income --直近4Qの純利益合計
     from
         quartely_report_join_tb
 ),
