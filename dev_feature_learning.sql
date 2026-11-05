@@ -13,6 +13,7 @@ stock_data as(
         roe,
         pbr,
         per,
+        payout_ratio,
         stock_reward,
         reward_rate,
         UP_flg,
@@ -24,22 +25,17 @@ stock_data as(
         ipo_flg,
         irregular_flg,
         stock_split,
-        buyback_flg,
-        lightgbm_up_rate,
-        lightgbm_down_rate,
+        buyback_flg
     from 
-        temp_folder.feature_learning_up as t1
-    left join
-        temp_folder.feature_learning_down as t2
-        using(created_at,stock_code)
+        feature_learning_prd.ml_base
     where 
         created_at >= '2025-04-01'
 ),
 joint_tb as(
     select
         t1.*,
-        t2.forecast_up_rate,
-        t3.forecast_down_rate,
+        t2.forcast_up_rate,
+        t3.forcast_down_rate,
         row_number() over(partition by t1.stock_code order by t1.created_at) as row_number
     from
         stock_data  as t1
@@ -54,25 +50,23 @@ suggest_add as(
     select
         *,
         case
-            when forcast_up_rate >= 0.9 and subgroup_up_rate >= 0.9 and forcast_down_rate < 0.2 and pbr >= 0 and irregular_flg is null and supervision_reason is null then '90%以上'
-            when forcast_up_rate >= 0.8 and subgroup_up_rate >= 0.8 and forcast_down_rate < 0.1 and pbr >= 0 and irregular_flg is null and supervision_reason is null then '80%以上'
-            when forcast_up_rate >= 0.7 and subgroup_up_rate >= 0.7 and forcast_down_rate < 0.1 and pbr >= 0 and irregular_flg is null and supervision_reason is null and ifnull(stock_split,0) not in(2,3) and buyback_flg is null and reward_rate >= 0.04 then '高配当'   
-            when forcast_up_rate >= 0.95 and forcast_down_rate < 0.1 and pbr >= 0 and irregular_flg is null and supervision_reason is null and ifnull(stock_split,0) not in(2,3) and buyback_flg is null and reward_rate >= 0.04 then '高配当'   
-            when forcast_up_rate >= 0.9 and subgroup_up_rate >= 0.7 and forcast_down_rate < 0.1 and pbr >= 0 and irregular_flg is null and supervision_reason is null and ifnull(stock_split,0) not in(2,3) and buyback_flg is null and weather in(4,5) then '優良企業'
-            when forcast_up_rate >= 0.9 and subgroup_up_rate >= 0.7 and forcast_down_rate < 0.1  and pbr >= 0 and irregular_flg is null and supervision_reason is null and ifnull(stock_split,0) not in(2,3) and buyback_flg is null then '確率のみ'
-            when forcast_up_rate >= 0.9  and forcast_down_rate < 0.1 and pbr >= 0 and irregular_flg is null and supervision_reason is null and ifnull(stock_split,0) not in(2,3) and buyback_flg is null and reward_rate >= 0.04 then '高配当(微)'   
-            when forcast_up_rate >= 0.9  and forcast_down_rate < 0.1 and pbr >= 0 and irregular_flg is null and supervision_reason is null and ifnull(stock_split,0) not in(2,3) and buyback_flg is null and weather in(4,5) then '優良企業(微)'
+            when forcast_up_rate >= 0.9 and forcast_down_rate < 0.1 and pbr >= 0 and irregular_flg is null and supervision_reason is null then '01:up90%以上down10%未満'
+            when forcast_up_rate >= 0.9 and forcast_down_rate < 0.2 and pbr >= 0 and irregular_flg is null and supervision_reason is null then '02:90%以上down20%未満'
+            when forcast_up_rate >= 0.8 and forcast_down_rate < 0.1 and pbr >= 0 and irregular_flg is null and supervision_reason is null then '03:80%以上down10%未満'
+            when forcast_up_rate >= 0.8 and forcast_down_rate < 0.15 and pbr >= 0 and irregular_flg is null and supervision_reason is null then '04:80%以上down15%未満'
+            when forcast_up_rate >= 0.7 and forcast_down_rate < 0.1 and pbr >= 0 and irregular_flg is null and supervision_reason is null and ifnull(stock_split,0) not in(2,3) and buyback_flg is null and reward_rate >= 0.04 then '05:高配当'  
+            when forcast_up_rate >= 0.7 and forcast_down_rate < 0.05 and pbr >= 0 and irregular_flg is null and supervision_reason is null and ifnull(stock_split,0) not in(2,3) and buyback_flg is null and weather in(4,5) then '06:優良企業'
+            when forcast_up_rate >= 0.7 and forcast_down_rate < 0.05  and pbr >= 0 and irregular_flg is null and supervision_reason is null and ifnull(stock_split,0) not in(2,3) and buyback_flg is null then '07:確率のみ'
         end as suggest_type,
         case
-            when forcast_up_rate >= 0.9 and subgroup_up_rate >= 0.9 and forcast_down_rate < 0.2 and pbr >= 0 and irregular_flg is null and supervision_reason is null then 1
-            when forcast_up_rate >= 0.8 and subgroup_up_rate >= 0.8 and forcast_down_rate < 0.1 and pbr >= 0 and irregular_flg is null and supervision_reason is null then 2
-            when forcast_up_rate >= 0.7 and subgroup_up_rate >= 0.7 and forcast_down_rate < 0.1 and pbr >= 0 and irregular_flg is null and supervision_reason is null and ifnull(stock_split,0) not in(2,3) and buyback_flg is null and reward_rate >= 0.04 then 3   
-            when forcast_up_rate >= 0.95 and forcast_down_rate < 0.1 and pbr >= 0 and irregular_flg is null and supervision_reason is null and ifnull(stock_split,0) not in(2,3) and buyback_flg is null and reward_rate >= 0.04 then 3
-            when forcast_up_rate >= 0.9 and subgroup_up_rate >= 0.7 and forcast_down_rate < 0.1 and pbr >= 0 and irregular_flg is null and supervision_reason is null and ifnull(stock_split,0) not in(2,3) and buyback_flg is null and weather in(4,5) then 4
-            when forcast_up_rate >= 0.9 and subgroup_up_rate >= 0.7 and forcast_down_rate < 0.1  and pbr >= 0 and irregular_flg is null and supervision_reason is null and ifnull(stock_split,0) not in(2,3) and buyback_flg is null then 5
-            when forcast_up_rate >= 0.9  and forcast_down_rate < 0.1 and pbr >= 0 and irregular_flg is null and supervision_reason is null and ifnull(stock_split,0) not in(2,3) and buyback_flg is null and reward_rate >= 0.04 then 6
-            when forcast_up_rate >= 0.9  and forcast_down_rate < 0.1 and pbr >= 0 and irregular_flg is null and supervision_reason is null and ifnull(stock_split,0) not in(2,3) and buyback_flg is null and weather in(4,5) then 7
-        end as suggest_sort, 
+            when forcast_up_rate >= 0.9 and forcast_down_rate < 0.1 and pbr >= 0 and irregular_flg is null and supervision_reason is null then 1
+            when forcast_up_rate >= 0.9 and forcast_down_rate < 0.2 and pbr >= 0 and irregular_flg is null and supervision_reason is null then 2
+            when forcast_up_rate >= 0.8 and forcast_down_rate < 0.1 and pbr >= 0 and irregular_flg is null and supervision_reason is null then 3
+            when forcast_up_rate >= 0.8 and forcast_down_rate < 0.15 and pbr >= 0 and irregular_flg is null and supervision_reason is null then 4
+            when forcast_up_rate >= 0.7 and forcast_down_rate < 0.1 and pbr >= 0 and irregular_flg is null and supervision_reason is null and ifnull(stock_split,0) not in(2,3) and buyback_flg is null and reward_rate >= 0.04 then 5
+            when forcast_up_rate >= 0.7 and forcast_down_rate < 0.05 and pbr >= 0 and irregular_flg is null and supervision_reason is null and ifnull(stock_split,0) not in(2,3) and buyback_flg is null and weather in(4,5) then 6
+            when forcast_up_rate >= 0.7 and forcast_down_rate < 0.05  and pbr >= 0 and irregular_flg is null and supervision_reason is null and ifnull(stock_split,0) not in(2,3) and buyback_flg is null then 7
+        end as suggest_sort,
     from
         joint_tb
 ),

@@ -55,7 +55,7 @@ for tables in(
 end for;
 
 ##################################################################################################################################################################################################################
-create or replace table looker_datamart.stock_data_explanatory_valiable_add
+create or replace table feature_learning_prd.ml_base
 partition by created_at 
 cluster by stock_code as(
 with
@@ -370,6 +370,7 @@ quarter_lag_add as(
         lag(quarter_operating_income) over(partition by stock_code order by period,quarter) as last_quarter_operating_income,
         lag(quarter_ordinaly_profit) over(partition by stock_code order by period,quarter) as last_quarter_ordinaly_profit,
         lag(quarter_net_income) over(partition by stock_code order by period,quarter) as last_quarter_net_income,
+        sum(quarter_net_income) over(partition by stock_code order by period,quarter rows between 3 preceding and current row) * 1000000 as total_net_income --直近4Qの純利益合計
     from
         quartely_report_join_tb
 ),
@@ -847,7 +848,7 @@ point_add as(
         round(close / before_day5_close,4) as day5_crease_rate,--前週比
         round(close / before_day20_close,4) as day20_crease_rate,--前月比
         round(close / before_day60_close,4) as day60_crease_rate,--三か月前比
-        (stock_reward * stock_amount) / nullif(net_income,0) as payout_ratio, --配当性向,特徴量ではない
+        (stock_reward * stock_amount) / nullif(total_net_income,0) as payout_ratio, --配当性向,特徴量ではない
         case 
             when increase_num <= -3 then -3
             when increase_num >= 3 then 3
@@ -1070,14 +1071,387 @@ pre_final as(
         on t1.created_at = t3.created_at and t1.market_cap_section = t3.market_cap_section
 )
 select  
-    *,
+    * except(market_cap_section,ipo_flg,supervision_reason,increase_num,irregular_flg,change_flg,year3_red_count,stock_reward_increase_flg,increase_past_day_tier,decrease_past_day_tier,volume_tier,buyback_flg,stock_split,quarter,month,q4_month_diff,type1),
+    case
+        when rsi = 0 then 0
+        when rsi < 10 then 1
+        when rsi < 20 then 2
+        when rsi < 30 then 3
+        when rsi < 40 then 4
+        when rsi < 50 then 5
+        when rsi < 60 then 6
+        when rsi < 70 then 7
+        when rsi < 80 then 8
+        when rsi < 90 then 9
+        when rsi >= 90 then 10
+        else 11
+    end as rsi_tier,
+    case
+        when volume_ratio < 30 then  1
+        when volume_ratio < 50 then  2
+        when volume_ratio < 70 then  3
+        when volume_ratio < 90 then  4
+        when volume_ratio < 120 then 5
+        when volume_ratio < 150 then 6
+        when volume_ratio < 200 then 7
+        when volume_ratio < 250 then 8
+        when volume_ratio < 250 then 9
+        when volume_ratio < 500 then 10
+        when volume_ratio < 1000 then 11
+        when volume_ratio >= 1000 then 12
+        else 13
+    end as volume_ratio_tier,
+    case
+        when psychological < 10 then  1
+        when psychological < 20 then  2
+        when psychological < 30 then  3
+        when psychological < 40 then  4
+        when psychological < 50 then  5
+        when psychological < 60 then  6
+        when psychological < 70 then  7
+        when psychological < 80 then  8
+        when psychological < 90 then  9
+        when psychological >= 90 then 10
+        else 11
+    end as psychological_tier,
+    case
+        when roc < -10 then  1
+        when roc < -7.5 then 2
+        when roc < -5 then   3
+        when roc < -2.5 then 4
+        when roc < -1 then   5
+        when roc < 0 then    6
+        when roc < 1 then    7
+        when roc < 2.5 then  8
+        when roc < 5 then    9
+        when roc < 7.5 then  10
+        when roc < 10 then   11
+        when roc >= 10 then  12     
+        else 13
+    end as roc_tier,
+    case
+        when rci < -100 then 1
+        when rci < -75 then  2
+        when rci < -50 then  3
+        when rci < -25 then  4
+        when rci < 0 then    5
+        when rci < 25 then   6
+        when rci < 50 then   7
+        when rci < 75 then   8
+        when rci >= 75 then  9
+        else 10
+    end as rci_tier,
+    case
+        when short_envelope < 0.95  then 1
+        when short_envelope < 0.975 then 2
+        when short_envelope < 0.99  then 3
+        when short_envelope < 1     then 4
+        when short_envelope < 1.01  then 5
+        when short_envelope < 1.025 then 6
+        when short_envelope < 1.5   then 7
+        when short_envelope >= 1.5  then 8
+        else 9
+    end as short_envelope_tier,
+    case
+        when envelope < 0.95  then 1
+        when envelope < 0.975 then 2
+        when envelope < 0.99  then 3
+        when envelope < 1     then 4
+        when envelope < 1.01  then 5
+        when envelope < 1.025 then 6
+        when envelope < 1.5   then 7
+        when envelope >= 1.5  then 8
+        else 9
+    end as envelope_tier,
+    case
+        when long_envelope < 0.95  then 1
+        when long_envelope < 0.975 then 2
+        when long_envelope < 0.99  then 3
+        when long_envelope < 1     then 4
+        when long_envelope < 1.01  then 5
+        when long_envelope < 1.025 then 6
+        when long_envelope < 1.5   then 7
+        when long_envelope >= 1.5  then 8
+        else 9
+    end as long_envelope_tier,
     case 
-        when month = 4 then 'apr'
-        when month = 9 then 'sep'
-        when market_volatility < 0.015  then 'vol_low'
-        when market_volatility < 0.018  then 'vol_mid'
-        when market_volatility >= 0.018 then 'vol_high'
-    end as subgroup
+        when bottom_relative_rate < 1.05 then  1
+        when bottom_relative_rate < 1.1  then  2
+        when bottom_relative_rate < 1.2  then  3
+        when bottom_relative_rate < 1.3  then  4
+        when bottom_relative_rate < 1.4  then  5
+        when bottom_relative_rate < 1.5  then  6    
+        when bottom_relative_rate < 1.6  then  7    
+        when bottom_relative_rate < 1.8  then  8    
+        when bottom_relative_rate >= 1.8 then  9        
+        else 10
+    end as bottom_relative_rate_tier,
+    case
+        when top_relative_rate < 0.2  then 1
+        when top_relative_rate < 0.3  then 2
+        when top_relative_rate < 0.4  then 3
+        when top_relative_rate < 0.5  then 4
+        when top_relative_rate < 0.6  then 5
+        when top_relative_rate < 0.7  then 6    
+        when top_relative_rate < 0.8  then 7    
+        when top_relative_rate < 0.9  then 8    
+        when top_relative_rate >= 0.9 then 9
+        else 10
+    end as top_relative_rate_tier,
+    case 
+        when day60_bottom_relative_rate < 1.05 then  1
+        when day60_bottom_relative_rate < 1.1  then  2
+        when day60_bottom_relative_rate < 1.2  then  3
+        when day60_bottom_relative_rate < 1.3  then  4
+        when day60_bottom_relative_rate < 1.4  then  5
+        when day60_bottom_relative_rate < 1.5  then  6    
+        when day60_bottom_relative_rate < 1.6  then  7    
+        when day60_bottom_relative_rate < 1.8  then  8    
+        when day60_bottom_relative_rate >= 1.8 then  9      
+        else  10
+    end as day60_bottom_relative_rate_tier,
+    case
+        when day60_top_relative_rate < 0.2  then 1
+        when day60_top_relative_rate < 0.3  then 2
+        when day60_top_relative_rate < 0.4  then 3
+        when day60_top_relative_rate < 0.5  then 4
+        when day60_top_relative_rate < 0.6  then 5
+        when day60_top_relative_rate < 0.7  then 6    
+        when day60_top_relative_rate < 0.8  then 7    
+        when day60_top_relative_rate < 0.9  then 8    
+        when day60_top_relative_rate >= 0.9 then 9
+        else 10
+    end as day60_top_relative_rate_tier,
+    case
+        when quarter_net_income_rate < -1.5 then  1
+        when quarter_net_income_rate < -1   then  2    
+        when quarter_net_income_rate < -0.5 then  3    
+        when quarter_net_income_rate < -0.3 then  4   
+        when quarter_net_income_rate < 0.0  then  5  
+        when quarter_net_income_rate < 0.3  then  6 
+        when quarter_net_income_rate < 0.5  then  7 
+        when quarter_net_income_rate < 1    then  8 
+        when quarter_net_income_rate < 1.5  then  9 
+        when quarter_net_income_rate >= 1.5 then  10
+        else 11
+    end as quarter_net_income_rate_tier,
+    case 
+        when roe < -0.1  then 1
+        when roe < -0.05 then 2  
+        when roe < -0.03 then 3  
+        when roe < -0.01 then 4    
+        when roe < 0     then 5    
+        when roe < 0.01  then 6  
+        when roe < 0.03  then 7
+        when roe < 0.05  then 8    
+        when roe < 0.07  then 9 
+        when roe < 0.1   then 10 
+        when roe < 0.2   then 11     
+        when roe >= 0.2  then 12    
+        else 13        
+    end as roe_tier,
+    case
+        when roa < -0.1  then 1
+        when roa < -0.05 then 2    
+        when roa < -0.03 then 3    
+        when roa < -0.01 then 4    
+        when roa < 0     then 5    
+        when roa < 0.01  then 6  
+        when roa < 0.03  then 7
+        when roa < 0.05  then 8    
+        when roa < 0.07  then 9 
+        when roa < 0.1   then 10
+        when roa < 0.2   then 11    
+        when roa >= 0.2  then 12    
+        else 13 
+    end as roa_tier,
+    case
+        when pbr < 0    then 1    
+        when pbr < 0.25 then 2    
+        when pbr < 0.5  then 3    
+        when pbr < 0.7  then 4    
+        when pbr < 1    then 5    
+        when pbr < 2    then 6    
+        when pbr < 3    then 7  
+        when pbr < 5    then 8
+        when pbr < 10   then 9    
+        when pbr < 15   then 10 
+        when pbr < 20   then 11 
+        when pbr >= 20  then 12
+        else 13
+    end as pbr_tier,
+    price_range, --元々tier
+    case
+        when reward_rate < 0.01  then 1    
+        when reward_rate < 0.02  then 2    
+        when reward_rate < 0.03  then 3  
+        when reward_rate < 0.04  then 4  
+        when reward_rate < 0.05  then 5  
+        when reward_rate >= 0.05 then 6    
+        else 7
+    end as reward_rate_tier,             
+    case
+        when market_volatility < 0.014 then  1    
+        when market_volatility < 0.015 then  2    
+        when market_volatility < 0.016 then  3  
+        when market_volatility < 0.017 then  4  
+        when market_volatility < 0.018 then  5
+        when market_volatility < 0.02  then  6  
+        when market_volatility < 0.04  then  7  
+        when market_volatility >= 0.04 then  8     
+        else 9
+    end as market_volatility_tier,           
+    case
+        when market_breath < 0.2  then 1    
+        when market_breath < 0.3  then 2    
+        when market_breath < 0.4  then 3  
+        when market_breath < 0.45 then 4  
+        when market_breath < 0.5  then 5
+        when market_breath < 0.55 then 6
+        when market_breath < 0.6  then 7  
+        when market_breath < 0.65 then 8
+        when market_breath >= 0.6 then 9     
+        else 10
+    end as market_breath_tier,
+    case
+        when market_return < -0.02   then 1    
+        when market_return < -0.01   then 2    
+        when market_return < -0.005  then 3    
+        when market_return < -0.0025 then 4    
+        when market_return < 0       then 5  
+        when market_return < 0.0025  then 6  
+        when market_return < 0.005   then 7
+        when market_return < 0.01    then 8  
+        when market_return < 0.02    then 9  
+        when market_return >= 0.02   then 10
+        else 11
+    end as market_return_tier,
+    case
+        when mcs_bottom_relative_rate < 1.025 then 1
+        when mcs_bottom_relative_rate < 1.05  then 2
+        when mcs_bottom_relative_rate < 1.075 then 3
+        when mcs_bottom_relative_rate < 1.1   then 4
+        when mcs_bottom_relative_rate < 1.2   then 5
+        when mcs_bottom_relative_rate < 1.3   then 6
+        when mcs_bottom_relative_rate >= 1.3  then 7        
+        else 8
+    end as mcs_bottom_relative_rate_tier,   
+    case
+        when mcs_top_relative_rate < 0.7    then 1    
+        when mcs_top_relative_rate < 0.8    then 2    
+        when mcs_top_relative_rate < 0.85   then 3    
+        when mcs_top_relative_rate < 0.9    then 4    
+        when mcs_top_relative_rate < 0.95   then 5    
+        when mcs_top_relative_rate < 0.975  then 6    
+        when mcs_top_relative_rate >= 0.975 then 7    
+        else 8              
+    end as mcs_top_relative_rate_tier,
+    case 
+        when day2_crease_rate < 0.9  then 1    
+        when day2_crease_rate < 0.95 then 2    
+        when day2_crease_rate < 0.98 then 3    
+        when day2_crease_rate < 0.99 then 4    
+        when day2_crease_rate < 1    then 5    
+        when day2_crease_rate < 1.01 then 6    
+        when day2_crease_rate < 1.02 then 7    
+        when day2_crease_rate < 1.05 then 8    
+        when day2_crease_rate < 1.1  then 9    
+        when day2_crease_rate >= 1.1 then 10
+        else 11
+    end as day2_crease_rate_tier,
+    case 
+        when day5_crease_rate < 0.9  then 1    
+        when day5_crease_rate < 0.95 then 2    
+        when day5_crease_rate < 0.98 then 3    
+        when day5_crease_rate < 0.99 then 4    
+        when day5_crease_rate < 1    then 5    
+        when day5_crease_rate < 1.01 then 6    
+        when day5_crease_rate < 1.02 then 7    
+        when day5_crease_rate < 1.05 then 8    
+        when day5_crease_rate < 1.1  then 9    
+        when day5_crease_rate >= 1.1 then 10
+        else 11
+    end as day5_crease_rate_tier, 
+    case 
+        when day20_crease_rate < 0.9  then 1    
+        when day20_crease_rate < 0.95 then 2    
+        when day20_crease_rate < 0.98 then 3    
+        when day20_crease_rate < 0.99 then 4    
+        when day20_crease_rate < 1    then 5    
+        when day20_crease_rate < 1.01 then 6    
+        when day20_crease_rate < 1.02 then 7    
+        when day20_crease_rate < 1.05 then 8    
+        when day20_crease_rate < 1.1  then 9    
+        when day20_crease_rate >= 1.1 then 10
+        else 11
+    end as day20_crease_rate_tier,               
+    case 
+        when day60_crease_rate < 0.9  then 1    
+        when day60_crease_rate < 0.95 then 2    
+        when day60_crease_rate < 0.98 then 3    
+        when day60_crease_rate < 0.99 then 4    
+        when day60_crease_rate < 1    then 5    
+        when day60_crease_rate < 1.01 then 6    
+        when day60_crease_rate < 1.02 then 7    
+        when day60_crease_rate < 1.05 then 8    
+        when day60_crease_rate < 1.1  then 9    
+        when day60_crease_rate >= 1.1 then 10
+        else 11
+    end as day60_crease_rate_tier,  
+    case
+        when net_income_annualized_ratio < -0.5 then 1  
+        when net_income_annualized_ratio < -0.2 then 2  
+        when net_income_annualized_ratio < -0.1 then 3  
+        when net_income_annualized_ratio < 0    then 4  
+        when net_income_annualized_ratio < 0.1  then 5  
+        when net_income_annualized_ratio < 0.2  then 6  
+        when net_income_annualized_ratio < 0.5  then 7  
+        when net_income_annualized_ratio >= 0.5 then 8      
+        else 9
+    end as net_income_annualized_ratio_tier,
+    free_float_ratio_tier,--元々tier
+    case
+        when volatility < 0.0075 then 1    
+        when volatility < 0.01   then 2    
+        when volatility < 0.0125 then 3    
+        when volatility < 0.015  then 4    
+        when volatility < 0.0175  then 5    
+        when volatility < 0.02   then 6    
+        when volatility < 0.025  then 7    
+        when volatility < 0.03   then 8    
+        when volatility >= 0.03  then 9   
+        else 10  
+    end as volatility_tier,   
+    case 
+        when net_income_rate < -1 then 1
+        when net_income_rate < -0.5 then 2
+        when net_income_rate < -0.25 then 3
+        when net_income_rate < -0.1 then 4
+        when net_income_rate < 0 then 5
+        when net_income_rate < 0.1 then 6
+        when net_income_rate < 0.25 then 7
+        when net_income_rate < 0.5 then 8
+        when net_income_rate < 1 then 9
+        when net_income_rate >= 1 then 10
+        else 11
+    end as net_income_rate_tier,  --net_income_gain_flgは削除
+    market_cap_section,
+    cast(ifnull(ipo_flg,0) as string) as ipo_flg,
+    ifnull(supervision_reason,'null') as supervision_reason,
+    cast(ifnull(increase_num,0) as string) as increase_num,
+    cast(ifnull(irregular_flg,0) as string) as irregular_flg,
+    cast(ifnull(change_flg,0) as string) as change_flg,
+    cast(year3_red_count as string) as year3_red_count,
+    cast(ifnull(stock_reward_increase_flg,0) as string) as stock_reward_increase_flg,
+    cast(ifnull(increase_past_day_tier,0) as string) as increase_past_day_tier,
+    cast(ifnull(decrease_past_day_tier,0) as string) as decrease_past_day_tier,
+    cast(volume_tier as string) as volume_tier,
+    cast(ifnull(buyback_flg,0) as string) as buyback_flg,
+    cast(ifnull(stock_split,0) as string) as stock_split,
+    cast(ifnull(quarter,99) as string) as quarter,
+    cast(ifnull(month,99) as string) as month,
+    cast(ifnull(q4_month_diff,99) as string) as q4_month_diff,
+    cast(ifnull(type1,0) as string) as type1,
 from    
     pre_final
 );
