@@ -69,7 +69,12 @@ lag_add as(--lagを付与しつつ調整後配当を取得
         lag(before_operating_income,1) over(partition by stock_code,period order by quarter) as lag_before_operating_income,
         lag(before_ordinaly_profit,1) over(partition by stock_code,period order by quarter) as lag_before_ordinaly_profit,
         lag(before_net_income,1) over(partition by stock_code,period order by quarter) as lag_before_net_income,
-        stock_reward / cum_split_rate as refine_stock_reward,--biで表示するための調整後配当
+        case 
+            when next_stock_amount is null or before_stock_reward is null then stock_reward / cum_split_rate 
+            when next_stock_amount / stock_amount >= 1.2 and  before_stock_reward / nullif(stock_reward,0) >= 1.2 --次回の発行済み株式数が現在より1.2倍以上=株式分割　かつ前回の配当が現在より1.2倍以上=既に分割後の配当になってる
+            then stock_reward 
+            else stock_reward / cum_split_rate 
+        end as refine_stock_reward,--biで表示するための調整後配当
         case 
             when next_stock_amount / stock_amount >= 1.2 and  before_stock_reward / nullif(stock_reward,0) >= 1.2 --次回の発行済み株式数が現在より1.2倍以上=株式分割　かつ前回の配当が現在より1.2倍以上=既に分割後の配当になってる
             then stock_reward  *(next_stock_amount / stock_amount)
@@ -117,16 +122,16 @@ quarter_value as(
         lag_add
 )
 select
-    release_date,
-    xbrl,
-    stock_code,
-    period,
-    quarter,
-    total_assets,--総資産
-    net_assets,--純資産
-    stock_amount,--発行済株式数
-    stock_reward,--配当
-    refine_stock_reward,--調整後配当
+    t1.release_date,
+    t1.xbrl,
+    t1.stock_code,
+    t1.period,
+    t1.quarter,
+    t1.total_assets,--総資産
+    t1.net_assets,--純資産
+    t1.stock_amount,--発行済株式数
+    t1.stock_reward,--配当
+    coalesce(t2.stock_reward,t1.refine_stock_reward) as refine_stock_reward,--調整後配当
     non_cum_stock_reward,--特徴量テーブル用の配当
     earnings,--売上(累積)
     operating_income,--営業利益(累積)
@@ -144,12 +149,15 @@ select
     (quarter_operating_income - quarter_before_operating_income) / nullif(abs(quarter_before_operating_income),0) as quarter_operating_income_rate,--前年同期比営業利益(四半期)
     (quarter_ordinaly_profit - quarter_before_ordinaly_profit) / nullif(abs(quarter_before_ordinaly_profit),0) as quarter_ordinaly_profit_rate,--前年同期比常利益(四半期)
     (quarter_net_income - quarter_before_net_income) / nullif(abs(quarter_before_net_income),0) as quarter_net_income_rate,--前年同期比純利益(四半期)
-    quarter_net_income * 4 / nullif(total_assets,0) as roa,--ROA(総資産利益率)
-    quarter_net_income * 4 / nullif(net_assets,0) as roe, --ROE(自己資本利益率)
-    net_assets / nullif(total_assets,0) as equity_ratio,--自己資本比率
-    (stock_reward * stock_amount) / nullif(net_income*1000000,0) reward_payout_ratio,--配当性向
-    (refine_stock_reward * stock_amount) / nullif((net_income*1000000),0) as  refine_reward_payout_ratio,--調整後配当性向
-    count(case when net_income < 0 then stock_code end) over(partition by stock_code order by period,quarter rows between 12 preceding and current row) as year3_red_count
+    quarter_net_income * 4 / nullif(t1.total_assets,0) as roa,--ROA(総資産利益率)
+    quarter_net_income * 4 / nullif(t1.net_assets,0) as roe, --ROE(自己資本利益率)
+    t1.net_assets / nullif(t1.total_assets,0) as equity_ratio,--自己資本比率
+    (t1.stock_reward * t1.stock_amount) / nullif(t1.net_income*1000000,0) reward_payout_ratio,--配当性向
+    (coalesce(t2.stock_reward,t1.refine_stock_reward) * t1.stock_amount) / nullif((t1.net_income*1000000),0) as  refine_reward_payout_ratio,--調整後配当性向
+    count(case when t1.net_income < 0 then stock_code end) over(partition by stock_code order by period,quarter rows between 12 preceding and current row) as year3_red_count
 from
-    quarter_value
+    quarter_value as t1
+left join
+    spreadsheet_link.refine_quartely_report_for_bi as t2
+    using(release_date,stock_code)
 )
