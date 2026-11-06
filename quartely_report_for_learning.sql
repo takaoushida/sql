@@ -260,7 +260,7 @@ final_data as(--最終的なperiod,quarterの値のみにする
 )
 --beforeがない場合前期の値をbeforeとして取得
 select 
-    t1.* except(xbrl,title,inpage_title,before_earnings,before_operating_income,before_ordinaly_profit,before_net_income),
+    t1.* except(title,inpage_title,before_earnings,before_operating_income,before_ordinaly_profit,before_net_income),
     coalesce(t1.before_earnings,t2.earnings) as before_earnings,
     coalesce(t1.before_operating_income,t2.operating_income) as before_operating_income,
     coalesce(t1.before_ordinaly_profit,t2.ordinaly_profit) as before_ordinaly_profit,
