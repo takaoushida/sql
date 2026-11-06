@@ -547,7 +547,8 @@ base_aggre as(--各テクニカル指標の元となる値を集計
             last_value(t1.real_split_rate ignore nulls) over(partition by t1.stock_code,t1.quarter,t1.join_start_date order by t1.created_at) 
         end as last_split_rate,--直近の株式分割率        
         t1.avg_volume_1y / t1.stock_amount as free_float_ratio, --流動株比率
-        case when t1.q4_month_diff <= 12 then t1.q4_month_diff end as q4_month_diff --遅延などにより12を上回ることが起こるので12以下とする
+        case when t1.q4_month_diff <= 12 then t1.q4_month_diff end as q4_month_diff, --遅延などにより12を上回ることが起こるので12以下とする
+        max(t1.cum_split_rate) over(partition by t1.stock_code,t1.join_start_date order by t1.created_at) as to_next_join_cum_split_rate --株式分割後次回決算短信までは分割率を保留した分割率,配当にかけるための分割率
      from 
         data_tb as t1
     left join
@@ -557,7 +558,7 @@ base_aggre as(--各テクニカル指標の元となる値を集計
 cum_split_rate_refine as(
     select
         * except(stock_reward,stock_amount),
-        stock_reward / greatest(ifnull(cum_split_rate,1),ifnull(last_split_rate,1)) as stock_reward, --直近の株式分割率を反映させた調整後配当
+        stock_reward / greatest(ifnull(to_next_join_cum_split_rate,1),ifnull(last_split_rate,1)) as stock_reward, --株式分割率を反映させた調整後配当,分割履歴がある銘柄で利回り20%以上になる銘柄がないことを確認済み
         close * adjust_split_rate as before_adjust_close, --調整前株価の再現、時価総額に使用
         final_stock_mount_adjust_split_rate * stock_amount as stock_amount --分割実施~分割を織り込んだ決算短信が発表されるまで株式数を分割後にしたもの
     from

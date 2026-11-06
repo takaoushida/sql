@@ -69,12 +69,7 @@ lag_add as(--lagを付与しつつ調整後配当を取得
         lag(before_operating_income,1) over(partition by stock_code,period order by quarter) as lag_before_operating_income,
         lag(before_ordinaly_profit,1) over(partition by stock_code,period order by quarter) as lag_before_ordinaly_profit,
         lag(before_net_income,1) over(partition by stock_code,period order by quarter) as lag_before_net_income,
-        case 
-            when next_stock_amount is null or before_stock_reward is null then stock_reward / cum_split_rate 
-            when next_stock_amount / stock_amount >= 1.2 and  before_stock_reward / nullif(stock_reward,0) >= 1.2 --次回の発行済み株式数が現在より1.2倍以上=株式分割　かつ前回の配当が現在より1.2倍以上=既に分割後の配当になってる
-            then stock_reward 
-            else stock_reward / cum_split_rate 
-        end as refine_stock_reward,--biで表示するための調整後配当
+        stock_reward / cum_split_rate as refine_stock_reward,--biで表示するための調整後配当
         case 
             when next_stock_amount / stock_amount >= 1.2 and  before_stock_reward / nullif(stock_reward,0) >= 1.2 --次回の発行済み株式数が現在より1.2倍以上=株式分割　かつ前回の配当が現在より1.2倍以上=既に分割後の配当になってる
             then stock_reward  *(next_stock_amount / stock_amount)
