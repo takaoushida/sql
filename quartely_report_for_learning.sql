@@ -276,5 +276,5 @@ left join
     on t1.stock_code = t2.stock_code and t1.period -1 = t2.period and t1.quarter = t2.quarter
 left join
     spreadsheet_link.refine_others as t3
-    on t1.xbrl = t2.xbrl
+    on REGEXP_EXTRACT(t1.xbrl, r'[^/]+$') = t2.xbrl
 )
