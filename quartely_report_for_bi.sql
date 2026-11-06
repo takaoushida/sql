@@ -123,6 +123,7 @@ quarter_value as(
 )
 select
     release_date,
+    xbrl,
     stock_code,
     period,
     quarter,

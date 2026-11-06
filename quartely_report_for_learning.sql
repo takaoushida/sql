@@ -230,10 +230,10 @@ base as(--beforeを掲載していない企業がある
         cast(replace(replace(before_operating_income,',',''),'(※)','') as float64) as before_operating_income,
         cast(replace(replace(before_ordinaly_profit,',',''),'(※)','') as float64) as before_ordinaly_profit,
         cast(replace(replace(before_net_income,',',''),'(※)','') as float64) as before_net_income,
-        total_assets,
-        net_assets,
-        stock_amount,
-        stock_reward,
+        coalesce(t4.total_assets,t3.total_assets) as total_assets,
+        coalesce(t4.net_assets,t3.net_assets) as net_assets,
+        coalesce(t4.stock_amount,t3.stock_amount) as stock_amount,
+        coalesce(t4.stock_reward,t3.stock_reward) as stock_reward
     from
         jpx.refine_securities_report_master as t1
     left join
@@ -242,6 +242,9 @@ base as(--beforeを掲載していない企業がある
     left join
         `jpx.others_*` as t3
         on t1.xbrl = t3.xbrl
+    left join
+        spreadsheet_link.refine_others as t4
+        on REGEXP_EXTRACT(t1.xbrl, r'[^/]+$') = t4.xbrl
 ),
 num_add as(--修正を含め四半期ごとの最終行を取得
     select
@@ -260,21 +263,14 @@ final_data as(--最終的なperiod,quarterの値のみにする
 )
 --beforeがない場合前期の値をbeforeとして取得
 select 
-    t1.* except(title,inpage_title,before_earnings,before_operating_income,before_ordinaly_profit,before_net_income,total_assets,net_assets,stock_amount,stock_reward),
+    t1.* except(title,inpage_title,before_earnings,before_operating_income,before_ordinaly_profit,before_net_income),
     coalesce(t1.before_earnings,t2.earnings) as before_earnings,
     coalesce(t1.before_operating_income,t2.operating_income) as before_operating_income,
     coalesce(t1.before_ordinaly_profit,t2.ordinaly_profit) as before_ordinaly_profit,
     coalesce(t1.before_net_income,t2.net_income) as before_net_income,
-    coalesce(t2.total_assets,t1.total_assets) as total_assets,
-    coalesce(t2.net_assets,t1.net_assets) as net_assets,
-    coalesce(t2.stock_amount,t1.stock_amount) as stock_amount,
-    coalesce(t2.stock_reward,t1.stock_reward) as stock_reward
 from 
     base as t1
 left join
     final_data as t2
     on t1.stock_code = t2.stock_code and t1.period -1 = t2.period and t1.quarter = t2.quarter
-left join
-    spreadsheet_link.refine_others as t3
-    on REGEXP_EXTRACT(t1.xbrl, r'[^/]+$') = t2.xbrl
 )
