@@ -55,6 +55,7 @@ for tables in(
 end for;
 
 ##################################################################################################################################################################################################################
+
 create or replace table feature_learning_prd.ml_base
 partition by created_at 
 cluster by stock_code as(
@@ -1054,6 +1055,8 @@ pre_final as(
         t2.market_volatility2, 
         t3.mcs_moving_avg, 
         t3.mcs_stocasticks,
+        t3.mcs_bottom_relative_rate,
+        t3.mcs_top_relative_rate,
         case when t3.market_cap_section = 'small' then  mcs_bottom_relative_rate end as mcs_small_bottom_relative_rate,
         case when t3.market_cap_section = 'mid' then  mcs_bottom_relative_rate end as mcs_mid_bottom_relative_rate,
         case when t3.market_cap_section = 'large' then  mcs_bottom_relative_rate end as mcs_large_bottom_relative_rate,
@@ -1071,7 +1074,7 @@ pre_final as(
         on t1.created_at = t3.created_at and t1.market_cap_section = t3.market_cap_section
 )
 select  
-    * except(market_cap_section,ipo_flg,supervision_reason,increase_num,irregular_flg,change_flg,year3_red_count,stock_reward_increase_flg,increase_past_day_tier,decrease_past_day_tier,volume_tier,buyback_flg,stock_split,quarter,month,q4_month_diff,type1),
+    * except(market_cap_section,ipo_flg,supervision_reason,increase_num,irregular_flg,change_flg,year3_red_count,stock_reward_increase_flg,increase_past_day_tier,decrease_past_day_tier,volume_tier,buyback_flg,stock_split,quarter,month,q4_month_diff,type1,mcs_bottom_relative_rate,mcs_top_relative_rate),
     case
         when rsi = 0 then 0
         when rsi < 10 then 1
@@ -1280,7 +1283,6 @@ select
         when pbr >= 20  then 12
         else 13
     end as pbr_tier,
-    price_range, --元々tier
     case
         when reward_rate < 0.01  then 1    
         when reward_rate < 0.02  then 2    
@@ -1409,7 +1411,6 @@ select
         when net_income_annualized_ratio >= 0.5 then 8      
         else 9
     end as net_income_annualized_ratio_tier,
-    free_float_ratio_tier,--元々tier
     case
         when volatility < 0.0075 then 1    
         when volatility < 0.01   then 2    

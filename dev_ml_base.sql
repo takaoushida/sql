@@ -1,61 +1,4 @@
-/*
-2025-07-31変更点
-month,q4_month_diff追加
-一筆書きに戻した
-
-*/
-DECLARE stock_code STRING;
-DECLARE suffix STRING;
---上場廃止銘柄のテーブルがワイルドカードだとメモリオーバーになるので1枚のテーブルにする
-for tables in(
-    with
-    delisting_dataset as(
-        select
-            distinct
-            replace(table_id,'delisting_','') as stock_code
-        from    
-            stock_data_delisting.__TABLES__
-    ),
-    delisting_table as(
-        select
-            distinct 
-            stock_code
-        from
-            stock_data.delisting_tables
-    )
-    select
-        t1.stock_code
-    from
-        delisting_dataset as t1
-    left join
-        delisting_table as t2
-        on t1.stock_code = t2.stock_code
-    where
-        t2.stock_code is null and t1.stock_code != 'None'
-    order by 1
-)
-    do  
-        execute immediate format(
-            """
-            insert into stock_data.delisting_tables --日によってフィールドの並び順が違うのでハードコーディング
-                select
-                    Date,	
-                    Open,	
-                    High,	
-                    Low	,
-                    Close,	
-                    cast(Volume as int64) as volume,	
-                    stock_code
-                from
-                    `stock_data_delisting.delisting_%s`
-
-            """, 
-        tables.stock_code
-        );
-end for;
-
-##################################################################################################################################################################################################################
-create or replace table feature_learning_prd.ml_base
+create or replace table feature_learning_dev.ml_base
 partition by created_at 
 cluster by stock_code as(
 with
@@ -547,8 +490,7 @@ base_aggre as(--各テクニカル指標の元となる値を集計
             last_value(t1.real_split_rate ignore nulls) over(partition by t1.stock_code,t1.quarter,t1.join_start_date order by t1.created_at) 
         end as last_split_rate,--直近の株式分割率        
         t1.avg_volume_1y / t1.stock_amount as free_float_ratio, --流動株比率
-        case when t1.q4_month_diff <= 12 then t1.q4_month_diff end as q4_month_diff, --遅延などにより12を上回ることが起こるので12以下とする
-        max(t1.cum_split_rate) over(partition by t1.stock_code,t1.join_start_date order by t1.created_at) as to_next_join_cum_split_rate --株式分割後次回決算短信までは分割率を保留した分割率,配当にかけるための分割率
+        case when t1.q4_month_diff <= 12 then t1.q4_month_diff end as q4_month_diff --遅延などにより12を上回ることが起こるので12以下とする
      from 
         data_tb as t1
     left join
@@ -558,7 +500,7 @@ base_aggre as(--各テクニカル指標の元となる値を集計
 cum_split_rate_refine as(
     select
         * except(stock_reward,stock_amount),
-        stock_reward / greatest(ifnull(to_next_join_cum_split_rate,1),ifnull(last_split_rate,1)) as stock_reward, --株式分割率を反映させた調整後配当,分割履歴がある銘柄で利回り20%以上になる銘柄がないことを確認済み
+        stock_reward / greatest(ifnull(cum_split_rate,1),ifnull(last_split_rate,1)) as stock_reward, --直近の株式分割率を反映させた調整後配当
         close * adjust_split_rate as before_adjust_close, --調整前株価の再現、時価総額に使用
         final_stock_mount_adjust_split_rate * stock_amount as stock_amount --分割実施~分割を織り込んだ決算短信が発表されるまで株式数を分割後にしたもの
     from
@@ -1055,6 +997,8 @@ pre_final as(
         t2.market_volatility2, 
         t3.mcs_moving_avg, 
         t3.mcs_stocasticks,
+        t3.mcs_bottom_relative_rate,
+        t3.mcs_top_relative_rate,
         case when t3.market_cap_section = 'small' then  mcs_bottom_relative_rate end as mcs_small_bottom_relative_rate,
         case when t3.market_cap_section = 'mid' then  mcs_bottom_relative_rate end as mcs_mid_bottom_relative_rate,
         case when t3.market_cap_section = 'large' then  mcs_bottom_relative_rate end as mcs_large_bottom_relative_rate,
@@ -1072,7 +1016,7 @@ pre_final as(
         on t1.created_at = t3.created_at and t1.market_cap_section = t3.market_cap_section
 )
 select  
-    * except(market_cap_section,ipo_flg,supervision_reason,increase_num,irregular_flg,change_flg,year3_red_count,stock_reward_increase_flg,increase_past_day_tier,decrease_past_day_tier,volume_tier,buyback_flg,stock_split,quarter,month,q4_month_diff,type1),
+    * except(market_cap_section,ipo_flg,supervision_reason,increase_num,irregular_flg,change_flg,year3_red_count,stock_reward_increase_flg,increase_past_day_tier,decrease_past_day_tier,volume_tier,buyback_flg,stock_split,quarter,month,q4_month_diff,type1,mcs_bottom_relative_rate,mcs_top_relative_rate),
     case
         when rsi = 0 then 0
         when rsi < 10 then 1
@@ -1281,7 +1225,6 @@ select
         when pbr >= 20  then 12
         else 13
     end as pbr_tier,
-    price_range, --元々tier
     case
         when reward_rate < 0.01  then 1    
         when reward_rate < 0.02  then 2    
@@ -1410,7 +1353,6 @@ select
         when net_income_annualized_ratio >= 0.5 then 8      
         else 9
     end as net_income_annualized_ratio_tier,
-    free_float_ratio_tier,--元々tier
     case
         when volatility < 0.0075 then 1    
         when volatility < 0.01   then 2    
