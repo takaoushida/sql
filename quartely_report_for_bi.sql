@@ -130,6 +130,7 @@ select
     t1.total_assets,--総資産
     t1.net_assets,--純資産
     t1.stock_amount,--発行済株式数
+    t1.cum_split_rate,--調整後配当確認用
     t1.stock_reward,--配当
     coalesce(t2.stock_reward,t1.refine_stock_reward) as refine_stock_reward,--調整後配当
     non_cum_stock_reward,--特徴量テーブル用の配当
