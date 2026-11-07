@@ -233,7 +233,8 @@ base as(--beforeを掲載していない企業がある
         coalesce(t4.total_assets,t3.total_assets) as total_assets,
         coalesce(t4.net_assets,t3.net_assets) as net_assets,
         coalesce(t4.stock_amount,t3.stock_amount) as stock_amount,
-        coalesce(t4.stock_reward,t3.stock_reward) as stock_reward
+        coalesce(t4.stock_reward,t3.stock_reward) as stock_reward,
+        t3.stock_reward_is_gemini
     from
         jpx.refine_securities_report_master as t1
     left join
