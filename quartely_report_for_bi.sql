@@ -155,7 +155,8 @@ select
     t1.net_assets / nullif(t1.total_assets,0) as equity_ratio,--自己資本比率
     (t1.stock_reward * t1.stock_amount) / nullif(t1.net_income*1000000,0) reward_payout_ratio,--配当性向
     (coalesce(t2.stock_reward,t1.refine_stock_reward) * t1.stock_amount) / nullif((t1.net_income*1000000),0) as  refine_reward_payout_ratio,--調整後配当性向
-    count(case when t1.net_income < 0 then stock_code end) over(partition by stock_code order by period,quarter rows between 12 preceding and current row) as year3_red_count
+    count(case when t1.net_income < 0 then stock_code end) over(partition by stock_code order by period,quarter rows between 12 preceding and current row) as year3_red_count,
+    t1.stock_reward_is_gemini
 from
     quarter_value as t1
 left join
