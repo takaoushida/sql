@@ -15,7 +15,7 @@ select
     t1.{flg}_rate as origin_{flg}_rate,
     t2.subgroup_{flg}_rate
 from
-    feature_learning_prd.origin_all_group_{flg}_{stage_name} as t1
+    feature_learning_prd.origin_all_group_depth4_{flg}_{stage_name} as t1
 left join   
     true_percent as t2
     on cast(t1.{flg}_rate * 100 as int64) = t2.forecast_rate
