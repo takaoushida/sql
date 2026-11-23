@@ -6,7 +6,7 @@ true_percent as(
     from
         temp_folder.all_group_forecast_{flg}_{stage_name}
     where
-        created_at between '{TEACHER_START_DATE}' and '{TEACHER_END_DATE}'
+        created_at between '{TEACHER_START_DATE_STR}' and '{TEACHER_END_DATE_STR}'
     group by 1
 )
 select
